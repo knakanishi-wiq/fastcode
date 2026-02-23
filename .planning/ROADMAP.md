@@ -22,7 +22,10 @@ This migration replaces direct openai/anthropic Python clients with litellm acro
   2. A standalone Python script calling `litellm.completion("vertex_ai/gemini-2.0-flash-001", ...)` returns a valid response using ADC credentials
   3. `.env.example` documents all required VertexAI vars (`VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`, model name format)
   4. Running the smoke test without `VERTEXAI_PROJECT` set produces a clear configuration error, not a misleading 401
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 01-01-PLAN.md — Install litellm[google], configure .env.example with VertexAI vars, create smoke test
 
 ### Phase 2: Core Infrastructure
 **Goal**: Centralized llm_client.py module exists and token counting works correctly for VertexAI model names
