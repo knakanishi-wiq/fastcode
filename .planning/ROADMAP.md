@@ -6,7 +6,7 @@ This migration replaces direct openai/anthropic Python clients with litellm acro
 
 ## Phases
 
-- [ ] **Phase 1: Config and Dependencies** - Install litellm, configure VertexAI env vars, validate ADC connection
+- [x] **Phase 1: Config and Dependencies** - Install litellm, configure VertexAI env vars, validate ADC connection
 - [ ] **Phase 2: Core Infrastructure** - Create llm_client.py, fix token counting, delete llm_utils.py
 - [ ] **Phase 3: Non-Streaming Migration** - Migrate query_processor, iterative_agent, repo_overview, repo_selector to llm_client
 - [ ] **Phase 4: Streaming Migration and Finalization** - Migrate answer_generator.py streaming path, clean up config
@@ -25,7 +25,7 @@ This migration replaces direct openai/anthropic Python clients with litellm acro
 **Plans**: 1 plan
 
 Plans:
-- [ ] 01-01-PLAN.md — Install litellm[google], configure .env.example with VertexAI vars, create smoke test
+- [x] 01-01-PLAN.md — Install litellm[google], configure .env.example with VertexAI vars, create smoke test
 
 ### Phase 2: Core Infrastructure
 **Goal**: Centralized llm_client.py module exists and token counting works correctly for VertexAI model names
@@ -66,7 +66,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Config and Dependencies | 0/TBD | Not started | - |
+| 1. Config and Dependencies | 1/1 | Complete | 2026-02-24 |
 | 2. Core Infrastructure | 0/TBD | Not started | - |
 | 3. Non-Streaming Migration | 0/TBD | Not started | - |
 | 4. Streaming Migration and Finalization | 0/TBD | Not started | - |
