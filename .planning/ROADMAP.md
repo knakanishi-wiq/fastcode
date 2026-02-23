@@ -1,0 +1,69 @@
+# Roadmap: FastCode — LiteLLM Provider Migration
+
+## Overview
+
+This migration replaces direct openai/anthropic Python clients with litellm across all LLM call sites in FastCode, enabling VertexAI as the primary provider via GCP Application Default Credentials. The work proceeds in dependency order: validate the VertexAI connection first, create the centralized client module, migrate the four lower-risk non-streaming files, then tackle the highest-risk streaming path in answer_generator.py while cleaning up vestigial config.
+
+## Phases
+
+- [ ] **Phase 1: Config and Dependencies** - Install litellm, configure VertexAI env vars, validate ADC connection
+- [ ] **Phase 2: Core Infrastructure** - Create llm_client.py, fix token counting, delete llm_utils.py
+- [ ] **Phase 3: Non-Streaming Migration** - Migrate query_processor, iterative_agent, repo_overview, repo_selector to llm_client
+- [ ] **Phase 4: Streaming Migration and Finalization** - Migrate answer_generator.py streaming path, clean up config
+
+## Phase Details
+
+### Phase 1: Config and Dependencies
+**Goal**: VertexAI connection is validated and working before any FastCode code is changed
+**Depends on**: Nothing (first phase)
+**Requirements**: CONF-01, CONF-02, CONF-04
+**Success Criteria** (what must be TRUE):
+  1. `litellm[google]` is installed and importable with no dependency conflicts
+  2. A standalone Python script calling `litellm.completion("vertex_ai/gemini-2.0-flash-001", ...)` returns a valid response using ADC credentials
+  3. `.env.example` documents all required VertexAI vars (`VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`, model name format)
+  4. Running the smoke test without `VERTEXAI_PROJECT` set produces a clear configuration error, not a misleading 401
+**Plans**: TBD
+
+### Phase 2: Core Infrastructure
+**Goal**: Centralized llm_client.py module exists and token counting works correctly for VertexAI model names
+**Depends on**: Phase 1
+**Requirements**: INFRA-01, INFRA-02, INFRA-03, INFRA-04, TOKN-01
+**Success Criteria** (what must be TRUE):
+  1. `fastcode/llm_client.py` exports `completion()` and `completion_stream()` callable from any FastCode module
+  2. `litellm.drop_params = True` and `litellm.suppress_debug_info = True` are set once at startup, not per-call
+  3. `count_tokens("vertex_ai/gemini-2.0-flash-001", text)` returns a numeric value without raising KeyError
+  4. `fastcode/llm_utils.py` no longer exists in the codebase
+**Plans**: TBD
+
+### Phase 3: Non-Streaming Migration
+**Goal**: All non-streaming LLM call sites use llm_client instead of direct provider clients
+**Depends on**: Phase 2
+**Requirements**: MIGR-01, MIGR-02, MIGR-03, MIGR-04, MIGR-05
+**Success Criteria** (what must be TRUE):
+  1. `query_processor.py`, `iterative_agent.py`, `repo_overview.py`, and `repo_selector.py` contain no imports of `openai` or `anthropic`
+  2. Provider dispatch branches (`if provider == "openai"`) are absent from all four migrated files
+  3. Sending a query through the API returns a valid code answer routed via VertexAI
+  4. The iterative agent completes a multi-turn retrieval cycle without system message errors from Gemini
+**Plans**: TBD
+
+### Phase 4: Streaming Migration and Finalization
+**Goal**: answer_generator.py streaming works through litellm and all provider-specific config is removed
+**Depends on**: Phase 3
+**Requirements**: STRM-01, STRM-02, STRM-03, CONF-03
+**Success Criteria** (what must be TRUE):
+  1. A streaming query via the web UI receives token-by-token chunks without errors or silent truncation
+  2. Responses containing `<SUMMARY>` tags are correctly buffered and filtered by `_stream_with_summary_filter()` using litellm chunk format
+  3. `answer_generator.py` contains no `_generate_openai_*` or `_generate_anthropic_*` methods
+  4. `config/config.yaml` contains no `generation.provider` field or `openai`/`anthropic` sections
+**Plans**: TBD
+
+## Progress
+
+**Execution Order:** 1 → 2 → 3 → 4
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Config and Dependencies | 0/TBD | Not started | - |
+| 2. Core Infrastructure | 0/TBD | Not started | - |
+| 3. Non-Streaming Migration | 0/TBD | Not started | - |
+| 4. Streaming Migration and Finalization | 0/TBD | Not started | - |
