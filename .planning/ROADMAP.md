@@ -78,5 +78,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Config and Dependencies | 1/1 | Complete | 2026-02-24 |
 | 2. Core Infrastructure | 2/2 | Complete   | 2026-02-24 |
-| 3. Non-Streaming Migration | 2/4 | In Progress|  |
+| 3. Non-Streaming Migration | 3/4 | In Progress|  |
 | 4. Streaming Migration and Finalization | 0/TBD | Not started | - |
