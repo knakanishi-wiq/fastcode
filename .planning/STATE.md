@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-24)
 ## Current Position
 
 Phase: 3 of 4 (Non-Streaming Migration)
-Plan: 1 of 4 in current phase (03-01 complete)
+Plan: 2 of 4 in current phase (03-02 complete)
 Status: In progress
-Last activity: 2026-02-24 — Plan 03-01 completed
+Last activity: 2026-02-24 — Plan 03-02 completed
 
 Progress: [██████░░░░] 60%
 
@@ -29,10 +29,10 @@ Progress: [██████░░░░] 60%
 |-------|-------|-------|----------|
 | 01-config-and-dependencies | 1 | 6min | 6min |
 | 02-core-infrastructure | 2 | 6min | 3min |
-| 03-non-streaming-migration | 1 | 2min | 2min |
+| 03-non-streaming-migration | 2 | 4min | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (6min), 02-01 (4min), 02-02 (2min), 03-01 (2min)
+- Last 5 plans: 01-01 (6min), 02-01 (4min), 02-02 (2min), 03-01 (2min), 03-02 (2min)
 - Trend: Faster
 
 *Updated after each plan completion*
@@ -59,6 +59,9 @@ Recent decisions affecting current work:
 - [03-01]: Remove os import entirely since all usages were in the dead constructor code being removed
 - [03-01]: Replace provider dispatch + _call_openai/_call_anthropic with single _call_llm() method calling llm_client.completion()
 - [03-01]: _should_use_llm_enhancement guard simplified — no instance-level client to check, use_llm_enhancement flag is sufficient
+- [03-02]: Both dispatch blocks in RepositorySelector replaced (select_relevant_files AND select_relevant_repos had identical provider branches)
+- [03-02]: if not self.llm_client guards removed from both methods — llm_client module always available, errors bubble up as exceptions
+- [03-02]: os import removed entirely — all usages were in dead constructor code
 
 ### Pending Todos
 
@@ -73,5 +76,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-24
-Stopped at: Completed 03-01-PLAN.md — query_processor.py migrated to llm_client; 4 callers remain broken pending Phase 3/4 migration
+Stopped at: Completed 03-02-PLAN.md — repo_selector.py migrated to llm_client; 3 callers remain broken pending Phase 3/4 migration (iterative_agent.py, repo_overview.py, answer_generator.py)
 Resume file: None
