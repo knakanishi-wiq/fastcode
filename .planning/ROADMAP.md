@@ -68,7 +68,11 @@ Plans:
   2. Responses containing `<SUMMARY>` tags are correctly buffered and filtered by `_stream_with_summary_filter()` using litellm chunk format
   3. `answer_generator.py` contains no `_generate_openai_*` or `_generate_anthropic_*` methods
   4. `config/config.yaml` contains no `generation.provider` field or `openai`/`anthropic` sections
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Migrate answer_generator.py to llm_client (STRM-01, STRM-02, STRM-03)
+- [ ] 04-02-PLAN.md — Clean config.yaml and .env.example of provider-specific fields (CONF-03)
 
 ## Progress
 
