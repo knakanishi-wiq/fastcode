@@ -15,8 +15,8 @@
 ### Non-Streaming Migration
 
 - [x] **MIGR-01**: `query_processor.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
-- [ ] **MIGR-02**: `iterative_agent.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
-- [ ] **MIGR-03**: `repo_overview.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
+- [x] **MIGR-02**: `iterative_agent.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
+- [x] **MIGR-03**: `repo_overview.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
 - [x] **MIGR-04**: `repo_selector.py` uses litellm via `llm_client` instead of direct openai/anthropic calls
 - [x] **MIGR-05**: Provider dispatch logic (`if provider == "openai"` branches) removed from all migrated files
 
@@ -72,8 +72,8 @@
 | INFRA-04 | Phase 2 | Complete |
 | TOKN-01 | Phase 2 | Complete |
 | MIGR-01 | Phase 3 | Complete |
-| MIGR-02 | Phase 3 | Pending |
-| MIGR-03 | Phase 3 | Pending |
+| MIGR-02 | Phase 3 | Complete |
+| MIGR-03 | Phase 3 | Complete |
 | MIGR-04 | Phase 3 | Complete |
 | MIGR-05 | Phase 3 | Complete |
 | STRM-01 | Phase 4 | Pending |

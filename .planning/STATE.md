@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-24)
 ## Current Position
 
 Phase: 3 of 4 (Non-Streaming Migration)
-Plan: 3 of 4 in current phase (03-03 complete)
-Status: In progress
-Last activity: 2026-02-24 — Plan 03-03 completed
+Plan: 4 of 4 in current phase (03-04 complete)
+Status: Phase 3 complete
+Last activity: 2026-02-24 — Plan 03-04 completed
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -29,13 +29,14 @@ Progress: [███████░░░] 70%
 |-------|-------|-------|----------|
 | 01-config-and-dependencies | 1 | 6min | 6min |
 | 02-core-infrastructure | 2 | 6min | 3min |
-| 03-non-streaming-migration | 3 | 6min | 2min |
+| 03-non-streaming-migration | 4 | 8min | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (4min), 02-02 (2min), 03-01 (2min), 03-02 (2min), 03-03 (2min)
+- Last 5 plans: 02-02 (2min), 03-01 (2min), 03-02 (2min), 03-03 (2min), 03-04 (2min)
 - Trend: Faster
 
 *Updated after each plan completion*
+| Phase 03-non-streaming-migration P04 | 2min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,9 @@ Recent decisions affecting current work:
 - [03-03]: os import kept in repo_overview.py — used for path operations (os.path.join, os.path.exists, os.sep, os.path.dirname, os.path.basename)
 - [03-03]: generate_overview guard simplified from 'if readme_content and self.llm_client' to 'if readme_content' — llm_client module always available
 - [03-03]: Unreachable fallback return after try/except removed — only triggered when provider was neither openai nor anthropic
+- [Phase 03-04]: os import kept in iterative_agent.py — used for path operations throughout ~3200-line file
+- [Phase 03-04]: System message in messages list (not system= kwarg) for litellm/Gemini/VertexAI compatibility
+- [Phase 03-04]: openai/anthropic kept in requirements.txt — answer_generator.py still imports them; deferred to Phase 4
 
 ### Pending Todos
 
@@ -73,11 +77,10 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 4]: `_stream_with_summary_filter()` chunk boundary behavior with litellm needs empirical testing — litellm chunk sizes may differ from Anthropic's granularity
-- [Phase 3]: Gemini system message conversion in `iterative_agent.py` is version-dependent in litellm — verify at implementation time
-- [Phase 3/4]: 2 files still import from deleted llm_utils (iterative_agent.py, answer_generator.py) — must be migrated before app is functional; query_processor.py, repo_selector.py, repo_overview.py now fixed
+- [Phase 3/4]: 1 file still imports from deleted llm_utils (answer_generator.py) — must be migrated before app is functional; all 4 Phase 3 files now fixed
 
 ## Session Continuity
 
 Last session: 2026-02-24
-Stopped at: Completed 03-03-PLAN.md — repo_overview.py migrated to llm_client; 2 callers remain broken pending Phase 3/4 migration (iterative_agent.py, answer_generator.py)
+Stopped at: Completed 03-04-PLAN.md — iterative_agent.py migrated to llm_client; all four Phase 3 files clean; answer_generator.py remains for Phase 4
 Resume file: None
