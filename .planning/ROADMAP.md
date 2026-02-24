@@ -51,7 +51,13 @@ Plans:
   2. Provider dispatch branches (`if provider == "openai"`) are absent from all four migrated files
   3. Sending a query through the API returns a valid code answer routed via VertexAI
   4. The iterative agent completes a multi-turn retrieval cycle without system message errors from Gemini
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Migrate query_processor.py to llm_client (MIGR-01, MIGR-05)
+- [ ] 03-02-PLAN.md — Migrate repo_selector.py to llm_client (MIGR-04, MIGR-05)
+- [ ] 03-03-PLAN.md — Migrate repo_overview.py to llm_client (MIGR-03, MIGR-05)
+- [ ] 03-04-PLAN.md — Migrate iterative_agent.py to llm_client + requirements.txt cleanup (MIGR-02, MIGR-05)
 
 ### Phase 4: Streaming Migration and Finalization
 **Goal**: answer_generator.py streaming works through litellm and all provider-specific config is removed
@@ -72,5 +78,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Config and Dependencies | 1/1 | Complete | 2026-02-24 |
 | 2. Core Infrastructure | 2/2 | Complete   | 2026-02-24 |
-| 3. Non-Streaming Migration | 0/TBD | Not started | - |
+| 3. Non-Streaming Migration | 0/4 | Not started | - |
 | 4. Streaming Migration and Finalization | 0/TBD | Not started | - |
