@@ -9,7 +9,7 @@
 
 - [x] **INFRA-01**: Centralized `fastcode/llm_client.py` module exposes `completion()` and `completion_stream()` via litellm
 - [x] **INFRA-02**: litellm globals set at startup: `drop_params=True`, `suppress_debug_info=True`
-- [ ] **INFRA-03**: `llm_utils.py` deleted — its functionality replaced by litellm param handling
+- [x] **INFRA-03**: `llm_utils.py` deleted — its functionality replaced by litellm param handling
 - [x] **INFRA-04**: Fallback/retry configuration via litellm's built-in retry logic
 
 ### Non-Streaming Migration
@@ -68,7 +68,7 @@
 | CONF-04 | Phase 1 | Complete |
 | INFRA-01 | Phase 2 | Complete |
 | INFRA-02 | Phase 2 | Complete |
-| INFRA-03 | Phase 2 | Pending |
+| INFRA-03 | Phase 2 | Complete |
 | INFRA-04 | Phase 2 | Complete |
 | TOKN-01 | Phase 2 | Complete |
 | MIGR-01 | Phase 3 | Pending |
