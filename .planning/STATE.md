@@ -9,29 +9,30 @@ See: .planning/PROJECT.md (updated 2026-02-24)
 
 ## Current Position
 
-Phase: 1 of 4 (Config and Dependencies)
-Plan: 1 of 1 in current phase (01-01 complete)
+Phase: 2 of 4 (Core Infrastructure)
+Plan: 1 of 4 in current phase (02-01 complete)
 Status: In progress
-Last activity: 2026-02-24 — Plan 01-01 completed
+Last activity: 2026-02-24 — Plan 02-01 completed
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 6min
-- Total execution time: 0.1 hours
+- Total plans completed: 2
+- Average duration: 5min
+- Total execution time: 0.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-config-and-dependencies | 1 | 6min | 6min |
+| 02-core-infrastructure | 1 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (6min)
-- Trend: -
+- Last 5 plans: 01-01 (6min), 02-01 (4min)
+- Trend: Faster
 
 *Updated after each plan completion*
 
@@ -48,6 +49,10 @@ Recent decisions affecting current work:
 - [01-01]: Use vertex_ai/ prefix in litellm model strings (not gemini/) to route through VertexAI with ADC
 - [01-01]: Smoke test happy path skips when VERTEXAI_PROJECT unset so CI without GCP credentials stays green
 - [01-01]: Broad keyword matching in error test (project/credentials/etc.) avoids fragile assertions on litellm version-specific messages
+- [02-01]: count_tokens(model, text) signature reversed from utils.count_tokens(text, model) — consistent with litellm API; callers migrating must update argument order
+- [02-01]: Import-time EnvironmentError (not at first call) — fail fast before any LLM call is attempted
+- [02-01]: tiktoken cl100k_base fallback for unknown model names in count_tokens
+- [02-01]: No logging/exception translation/streaming wrapper — thin pass-through only
 
 ### Pending Todos
 
@@ -61,5 +66,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-24
-Stopped at: Completed 01-01-PLAN.md — litellm installed, .env.example configured, smoke tests passing
+Stopped at: Completed 02-01-PLAN.md — fastcode/llm_client.py created with litellm globals, env validation, count_tokens with tiktoken fallback
 Resume file: None
