@@ -36,7 +36,11 @@ Plans:
   2. `litellm.drop_params = True` and `litellm.suppress_debug_info = True` are set once at startup, not per-call
   3. `count_tokens("vertex_ai/gemini-2.0-flash-001", text)` returns a numeric value without raising KeyError
   4. `fastcode/llm_utils.py` no longer exists in the codebase
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Create fastcode/llm_client.py with TDD (completion, completion_stream, count_tokens, env validation)
+- [ ] 02-02-PLAN.md — Delete fastcode/llm_utils.py (superseded by litellm.drop_params=True)
 
 ### Phase 3: Non-Streaming Migration
 **Goal**: All non-streaming LLM call sites use llm_client instead of direct provider clients
