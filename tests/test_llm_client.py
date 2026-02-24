@@ -18,10 +18,26 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _reload_llm_client():
-    """Delete cached module and re-import to test import-time side effects."""
+    """Delete cached module and re-import to test import-time side effects.
+
+    Loads llm_client.py directly by file path (bypasses fastcode/__init__.py,
+    which imports from modules that are intentionally broken during Phase 2-3
+    migration).
+    """
+    import importlib.util
+    import pathlib
+
     if "fastcode.llm_client" in sys.modules:
         del sys.modules["fastcode.llm_client"]
-    return importlib.import_module("fastcode.llm_client")
+
+    spec = importlib.util.spec_from_file_location(
+        "fastcode.llm_client",
+        pathlib.Path(__file__).parent.parent / "fastcode" / "llm_client.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fastcode.llm_client"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 # ---------------------------------------------------------------------------
