@@ -29,7 +29,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 | 3. Non-Streaming Migration | v1.0 | 4/4 | Complete | 2026-02-24 |
 | 4. Streaming Migration and Finalization | v1.0 | 2/2 | Complete | 2026-02-25 |
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
-| 6. Embedder Migration | v1.1 | 0/1 | Pending | — |
+| 6. Embedder Migration | 1/1 | Complete   | 2026-02-25 | — |
 | 7. Dependency Cleanup and Smoke Test | v1.1 | 0/1 | Pending | — |
 
 ---
@@ -40,7 +40,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Goal:** Replace the sentence-transformers backend in `fastcode/embedder.py` with `litellm.embedding()` calling `vertex_ai/gemini-embedding-001`. Update config and the one indexer.py call site that embeds repo overviews.
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 06-01-PLAN.md — Rewrite CodeEmbedder (litellm backend), update config.yaml embedding section, 1-line indexer.py change

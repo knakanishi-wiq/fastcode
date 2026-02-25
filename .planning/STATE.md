@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-25 — Milestone v1.1 started
+Phase: 06-embedder-migration
+Plan: 01 complete
+Status: Phase 6 Plan 1 complete
+Last activity: 2026-02-25 — Phase 6 Plan 1 complete: embedder migrated to litellm/VertexAI
 
 ## Performance Metrics
 
@@ -38,6 +38,7 @@ Last activity: 2026-02-25 — Milestone v1.1 started
 | Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
 | Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
 | Phase 05-fix-answer-generator-wiring-and-cleanup P01 | 3min | 2 tasks | 3 files |
+| Phase 06-embedder-migration P01 | 3min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,10 @@ Recent decisions affecting current work:
 - [05-01]: MODEL fallback uses llm_client.DEFAULT_MODEL (not hardcoded string) — single source of truth for default model
 - [05-01]: openai and anthropic removed from requirements.txt — no fastcode/ file imports them post-Phase 4
 - [05-01]: .env.example MODEL updated from placeholder to vertex_ai/ prefix example; LITELLM_MODEL entry added
+- [Phase 06-01]: litellm.embedding() with task_type kwarg routes to VertexAI without provider-specific client code
+- [Phase 06-01]: embedding_dim=3072 read from config at init — no HTTP call at init time
+- [Phase 06-01]: embed_text() defaults task_type to RETRIEVAL_QUERY so retriever.py callers require zero changes
+- [Phase 06-01]: item["embedding"] dict-style access used (not item.embedding) for litellm version safety
 
 ### Pending Todos
 
@@ -93,5 +98,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 05-01-PLAN.md — answer_generator.py fully wired to llm_client token counting; 6 count_tokens call sites fixed; MODEL=None risk eliminated; dead openai/anthropic deps removed; Phase 5 complete
+Stopped at: Completed 06-01-PLAN.md — CodeEmbedder rewritten to use litellm.embedding() with vertex_ai/gemini-embedding-001; torch/sentence-transformers eliminated; config embedding section updated; indexer.py call site updated with task_type=RETRIEVAL_DOCUMENT; Phase 6 Plan 1 complete
 Resume file: None
