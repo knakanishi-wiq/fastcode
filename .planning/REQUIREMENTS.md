@@ -22,9 +22,9 @@
 
 ### Streaming Migration
 
-- [x] **STRM-01**: `answer_generator.py` non-streaming `generate()` uses litellm via `llm_client`
-- [x] **STRM-02**: `answer_generator.py` streaming `generate_stream()` uses litellm via `llm_client`
-- [x] **STRM-03**: `_stream_with_summary_filter()` works correctly with litellm chunk format
+- [ ] **STRM-01**: `answer_generator.py` non-streaming `generate()` uses litellm via `llm_client`
+- [ ] **STRM-02**: `answer_generator.py` streaming `generate_stream()` uses litellm via `llm_client`
+- [ ] **STRM-03**: `_stream_with_summary_filter()` works correctly with litellm chunk format
 
 ### Configuration & Auth
 
@@ -35,7 +35,7 @@
 
 ### Token Counting
 
-- [x] **TOKN-01**: `count_tokens()` in `utils.py` uses `litellm.token_counter()` instead of direct tiktoken
+- [ ] **TOKN-01**: `count_tokens()` in `utils.py` uses `litellm.token_counter()` instead of direct tiktoken
 
 ## v2 Requirements
 
@@ -70,21 +70,22 @@
 | INFRA-02 | Phase 2 | Complete |
 | INFRA-03 | Phase 2 | Complete |
 | INFRA-04 | Phase 2 | Complete |
-| TOKN-01 | Phase 2 | Complete |
+| TOKN-01 | Phase 5 | Pending |
 | MIGR-01 | Phase 3 | Complete |
 | MIGR-02 | Phase 3 | Complete |
 | MIGR-03 | Phase 3 | Complete |
 | MIGR-04 | Phase 3 | Complete |
 | MIGR-05 | Phase 3 | Complete |
-| STRM-01 | Phase 4 | Complete |
-| STRM-02 | Phase 4 | Complete |
-| STRM-03 | Phase 4 | Complete |
+| STRM-01 | Phase 5 | Pending |
+| STRM-02 | Phase 5 | Pending |
+| STRM-03 | Phase 5 | Pending |
 | CONF-03 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 17 total
 - Mapped to phases: 17
 - Unmapped: 0 ✓
+- Pending (gap closure): TOKN-01, STRM-01, STRM-02, STRM-03 → Phase 5
 
 ---
 *Requirements defined: 2026-02-24*

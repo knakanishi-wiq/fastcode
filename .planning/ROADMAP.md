@@ -74,9 +74,25 @@ Plans:
 - [ ] 04-01-PLAN.md — Migrate answer_generator.py to llm_client (STRM-01, STRM-02, STRM-03)
 - [ ] 04-02-PLAN.md — Clean config.yaml and .env.example of provider-specific fields (CONF-03)
 
+### Phase 5: Fix answer_generator.py Wiring and Cleanup
+**Goal:** All partial requirements from the v1.0 audit are fully satisfied — answer_generator.py routes token counting through llm_client, MODEL env var has a safe fallback, dead dependencies are removed, and .env.example documents all required vars
+**Depends on**: Phase 4
+**Requirements**: TOKN-01, STRM-01, STRM-02, STRM-03, CONF-01, CONF-02
+**Gap Closure:** Closes gaps from v1.0 audit
+**Success Criteria** (what must be TRUE):
+  1. `answer_generator.py` imports `count_tokens` from `fastcode.llm_client`, not `fastcode.utils`
+  2. All `count_tokens` call sites use reversed arg order `(self.model, prompt)` matching `llm_client.count_tokens` signature
+  3. `self.model` falls back to `llm_client.DEFAULT_MODEL` when `MODEL` env var is unset
+  4. `requirements.txt` contains no `openai` or `anthropic` entries
+  5. `.env.example` documents `LITELLM_MODEL` and includes a `vertex_ai/` prefix hint for `MODEL`
+**Plans**: 1 plan
+
+Plans:
+- [ ] 05-01-PLAN.md — Fix answer_generator.py wiring, clean requirements.txt, update .env.example
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4
+**Execution Order:** 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -84,3 +100,4 @@ Plans:
 | 2. Core Infrastructure | 2/2 | Complete   | 2026-02-24 |
 | 3. Non-Streaming Migration | 4/4 | Complete   | 2026-02-24 |
 | 4. Streaming Migration and Finalization | 1/2 | In Progress|  |
+| 5. Fix answer_generator.py Wiring and Cleanup | 0/1 | Pending | |
