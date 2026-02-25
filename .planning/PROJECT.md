@@ -1,22 +1,12 @@
 # FastCode — LiteLLM Provider Migration
 
-## Current Milestone: v1.1 VertexAI Embedding Migration
-
-**Goal:** Replace sentence-transformers with VertexAI gemini-embedding-001 via litellm, completing the GCP-native routing story for both text generation and embeddings.
-
-**Target features:**
-- `fastcode/embedder.py` rewritten to call `litellm.embedding()` with `vertex_ai/gemini-embedding-001`
-- Differentiated `task_type`: `RETRIEVAL_DOCUMENT` at index time, `RETRIEVAL_QUERY` at query time
-- Remove `sentence-transformers` and `torch` from dependencies
-- Smoke test for embedding via ADC (parallel to v1.0 LLM smoke test)
-
 ## What This Is
 
-FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM calls through litellm, enabling VertexAI on GCP via Application Default Credentials. The v1.0 migration replaced direct openai/anthropic Python clients across all five LLM call sites with a centralized `fastcode/llm_client.py` module. v1.1 extends this to embeddings — replacing the local sentence-transformers model with VertexAI gemini-embedding-001.
+FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely.
 
 ## Core Value
 
-All LLM calls in FastCode route through litellm, so the system works with VertexAI on GCP without maintaining separate provider-specific client code.
+All LLM and embedding calls in FastCode route through litellm, so the system works fully on VertexAI via ADC without maintaining any provider-specific client code.
 
 ## Requirements
 
@@ -36,13 +26,14 @@ All LLM calls in FastCode route through litellm, so the system works with Vertex
 - ✓ CLI entry point via Click — pre-existing
 - ✓ Configuration via config.yaml and .env — pre-existing
 - ✓ Docker + docker-compose deployment — pre-existing
+- ✓ Replace `CodeEmbedder` sentence-transformers backend with `litellm.embedding()` calling `vertex_ai/gemini-embedding-001` — v1.1
+- ✓ Pass `task_type=RETRIEVAL_DOCUMENT` when indexing, `task_type=RETRIEVAL_QUERY` when embedding queries — v1.1
+- ✓ Remove `sentence-transformers` and `torch` from `requirements.txt` and `Dockerfile` — v1.1
+- ✓ ADC embedding smoke test (skips in CI, verifies shape/normalization live) — v1.1
 
 ### Active
 
-- [ ] Replace `CodeEmbedder` sentence-transformers backend with `litellm.embedding()` calling `vertex_ai/gemini-embedding-001`
-- [ ] Pass `task_type=RETRIEVAL_DOCUMENT` when indexing, `task_type=RETRIEVAL_QUERY` when embedding queries
-- [ ] Remove `sentence-transformers` and `torch` from `requirements.txt`
-- [ ] Add ADC embedding smoke test
+(None — start next milestone with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -55,19 +46,25 @@ All LLM calls in FastCode route through litellm, so the system works with Vertex
 
 ## Context
 
-FastCode's LLM calls route through `fastcode/llm_client.py`. Package is ~16,600 LOC Python (13 source files). All 5 call sites migrated. Streaming tested live against VertexAI (`gemini-3-flash-preview`) — 13/13 smoke tests passing.
+All LLM and embedding calls route through litellm. Package is ~55,300 LOC Python. v1.1 shipped 2026-02-25 — both phases complete, 11/11 requirements satisfied, smoke test passed live against VertexAI ADC.
 
-**Remaining tech debt (environmental):**
+**Shipped v1.1 (Phases 6–7):** `fastcode/embedder.py` rewritten, `sentence-transformers`/`torch` removed from all dependency manifests, `tests/test_embedder_smoke.py` live-verified (shape `(3072,)`, L2 norm 1.0, `gemini-embedding-001`).
+
+**Remaining tech debt (v1.1):**
+- `fastcode/__init__.py` platform import block — dead code post sentence-transformers removal; tracked in `deferred-items.md`
+- `retriever.py` lines 415, 734 rely on `embed_text()` default `task_type` — correct at runtime, but intent invisible at call site
 - Streaming UI token-by-token observation (requires live browser session)
 - `_stream_with_summary_filter()` SUMMARY tag chunk boundary behavior (requires live multi-turn session)
+
+**Known consequence:** Existing FAISS indexes are incompatible (dimension 384 → 3072); delete `./data/vector_store/` before first use after upgrade.
 
 ## Constraints
 
 - **Backward compatibility**: Existing config.yaml and .env patterns still work — only env var names changed (`MODEL`, `LITELLM_MODEL` instead of OpenAI API key)
 - **Streaming**: `answer_generator.py` streaming preserved via `litellm.completion_stream()` + `choices[0].delta.content` chunk format
 - **Docker**: Container deployment works with ADC (mount `~/.config/gcloud` or use workload identity)
-- **No new embedding dependencies**: v1.1 removes sentence-transformers/torch; litellm already present
-- **FAISS index reindex required**: embedding dimension changes (384 → 768); existing persisted indexes must be cleared on first run
+- **No new embedding dependencies**: sentence-transformers/torch removed; litellm (already present) handles all embedding calls
+- **FAISS index reindex required**: embedding dimension changed (384 → 3072); existing persisted indexes in `./data/vector_store/` must be deleted before first use after upgrade
 
 ## Key Decisions
 
@@ -84,6 +81,11 @@ FastCode's LLM calls route through `fastcode/llm_client.py`. Package is ~16,600 
 | Smoke test skips when `VERTEXAI_PROJECT` unset | CI without GCP credentials stays green | ✓ Good — no CI breakage; broad keyword matching avoids litellm version-specific error text |
 | `MODEL` and `LITELLM_MODEL` as independent env vars | `answer_generator.py` has pre-existing `MODEL` var; other callers use `LITELLM_MODEL` via DEFAULT_MODEL | ⚠ Revisit — operational confusion risk; documented in .env.example but independence not obvious |
 | `litellm.num_retries = 3` global | Transient VertexAI errors auto-retried without per-call config | ✓ Good — set alongside other globals in llm_client.py |
+| `litellm.embedding()` with `task_type` kwarg for VertexAI routing | Avoids provider-specific client; same litellm pattern as LLM calls | ✓ Good — R1-R7 all satisfied; smoke test live-confirmed |
+| `embedding_dim=3072` read from config at init (no cold-start API call) | FAISS index needs dimension at construction; cold-start call would block init | ✓ Good — CodeEmbedder.__init__() makes zero HTTP calls; dimension hardened via config |
+| R8+R10 committed atomically (requirements.txt + main.py default together) | If requirements.txt loses sentence-transformers before main.py is updated, config-absent deploy hits litellm.BadRequestError (not ImportError) | ✓ Good — atomic commit closes the deploy breakage window |
+| `embed_text()` default `task_type="RETRIEVAL_QUERY"` — retriever.py callers require zero changes | Backwards-compatible addition; intent is visible in embedder.py signature | ⚠ Revisit — retriever.py call sites (lines 415, 734) don't forward task_type explicitly; latent fragility if default changes |
+| `ENV TOKENIZERS_PARALLELISM=false` left in Dockerfile | Harmless no-op after sentence-transformers removal; R9 spec excluded it | ✓ Good — no harm; can be removed in a future cleanup |
 
 ---
-*Last updated: 2026-02-25 after v1.1 milestone start*
+*Last updated: 2026-02-25 after v1.1 milestone completion*
