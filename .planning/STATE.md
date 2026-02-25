@@ -4,15 +4,15 @@
 
 See: .planning/PROJECT.md (updated 2026-02-25)
 
-**Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Milestone v1.1 — VertexAI Embedding Migration
+**Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
+**Current focus:** Planning next milestone (`/gsd:new-milestone`)
 
 ## Current Position
 
-Phase: 07-dependency-cleanup-and-smoke-test
-Plan: 02 complete
-Status: Phase 7 Plan 2 complete — phase complete
-Last activity: 2026-02-25 — Phase 7 Plan 2 complete: embedder smoke test added for litellm/VertexAI ADC path
+Phase: milestone complete
+Plan: all complete
+Status: v1.1 VertexAI Embedding Migration shipped — 2 phases, 3 plans, 11/11 requirements satisfied
+Last activity: 2026-02-25 — v1.1 milestone completed and archived
 
 ## Performance Metrics
 
@@ -98,11 +98,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4]: `_stream_with_summary_filter()` chunk boundary behavior with litellm needs empirical testing — litellm chunk sizes may differ from Anthropic's granularity
-- [RESOLVED]: answer_generator.py was last file importing from deleted llm_utils — now migrated; runtime ImportError eliminated
+- [v1.1 tech debt]: `retriever.py` lines 415, 734 rely on `embed_text()` default `task_type`; explicit kwarg recommended
+- [v1.1 tech debt]: `fastcode/__init__.py` platform import block is dead code post sentence-transformers removal
+- [v1.0/v1.1 open]: `_stream_with_summary_filter()` chunk boundary behavior with litellm — needs live multi-turn session to test
 
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 07-02-PLAN.md — embedder smoke test added (TestEmbedderSmoke); asserts shape (3072,), all finite, L2 norm ≈ 1.0; skips in CI when VERTEXAI_PROJECT unset; Phase 7 complete
+Stopped at: v1.1 milestone completed — all phases executed, verified (11/11 requirements), audited (tech_debt), and archived
 Resume file: None

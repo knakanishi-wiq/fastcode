@@ -16,3 +16,13 @@
 
 ---
 
+
+## v1.1 VertexAI Embedding Migration (Shipped: 2026-02-25)
+
+**Phases completed:** 2 phases, 3 plans, 0 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+
