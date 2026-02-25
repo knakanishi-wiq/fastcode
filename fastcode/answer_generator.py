@@ -7,11 +7,9 @@ import re
 import json
 from typing import List, Dict, Any, Optional, Tuple, Callable
 import os
-from openai import OpenAI
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
-from .llm_utils import openai_chat_completion
+from fastcode import llm_client
 from .utils import count_tokens, truncate_to_tokens
 
 
@@ -23,7 +21,6 @@ class AnswerGenerator:
         self.gen_config = config.get("generation", {})
         self.logger = logging.getLogger(__name__)
         
-        self.provider = self.gen_config.get("provider", "openai")
         # self.model = self.gen_config.get("model", "openai/gpt-oss-120b")
         # self.base_url = self.gen_config.get("base_url", "https://openrouter.ai/api/v1")
         self.temperature = self.gen_config.get("temperature", 0.4)
@@ -42,32 +39,9 @@ class AnswerGenerator:
         
         # Load environment variables from .env file
         load_dotenv()
-        
-        # Initialize LLM client
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.base_url = os.getenv("BASE_URL")
-        self.model = os.getenv("MODEL")
-        self.client = self._initialize_client()
 
-    def _initialize_client(self):
-        """Initialize LLM client based on provider"""
-        if self.provider == "openai":
-            api_key = self.api_key
-            if not api_key:
-                self.logger.warning("OPENAI_API_KEY not set")
-            return OpenAI(api_key=api_key, base_url=self.base_url)
-        
-        elif self.provider == "anthropic":
-            api_key = self.anthropic_api_key
-            if not api_key:
-                self.logger.warning("ANTHROPIC_API_KEY not set")
-            return Anthropic(api_key=api_key, base_url=self.base_url)
-        
-        else:
-            self.logger.warning(f"Unknown provider: {self.provider}")
-            return None
-    
+        self.model = os.getenv("MODEL")
+
     def generate(self, query: str, retrieved_elements: List[Dict[str, Any]], 
                  query_info: Optional[Dict[str, Any]] = None,
                  dialogue_history: Optional[List[Dict[str, Any]]] = None,
@@ -632,108 +606,6 @@ Symbol Mappings:
         """Truncate context to fit within token limit"""
         return truncate_to_tokens(context, max_tokens, self.model)
     
-    def _generate_openai(self, prompt: str) -> str:
-        """Generate answer using OpenAI"""
-        if self.client is None:
-            return "Error: OpenAI client not initialized"
-
-        try:
-            response = openai_chat_completion(
-                self.client,
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            # print("response: ", response)
-
-            # Defensive checks because some providers may return partial/None payloads
-            if not response or not getattr(response, "choices", None):
-                raise ValueError(f"Empty response or no choices returned: {response}")
-            first_choice = response.choices[0]
-            message = getattr(first_choice, "message", None)
-            content = getattr(message, "content", None) if message else None
-            if content is None:
-                raise ValueError(f"LLM response has no content: {response}")
-            return content
-
-        except Exception as e:
-            self.logger.error(f"OpenAI API error: {e}")
-            raise
-
-    def _generate_openai_stream(self, prompt: str):
-        """Generate answer using OpenAI with streaming"""
-        if self.client is None:
-            yield "Error: OpenAI client not initialized"
-            return
-
-        try:
-            response = openai_chat_completion(
-                self.client,
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=True,
-            )
-
-            for chunk in response:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        yield delta.content
-
-        except Exception as e:
-            self.logger.error(f"OpenAI streaming API error: {e}")
-            yield f"\n\nError: {str(e)}"
-
-    def _generate_anthropic(self, prompt: str) -> str:
-        """Generate answer using Anthropic Claude"""
-        if self.client is None:
-            return "Error: Anthropic client not initialized"
-        
-        try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            # Defensive checks because some providers may return partial/None payloads
-            if not response or not getattr(response, "content", None):
-                raise ValueError(f"Empty response or no content returned: {response}")
-            first_block = response.content[0] if response.content else None
-            text = getattr(first_block, "text", None) if first_block else None
-            if text is None:
-                raise ValueError(f"LLM response has no text: {response}")
-            return text
-        
-        except Exception as e:
-            self.logger.error(f"Anthropic API error: {e}")
-            raise
-
-    def _generate_anthropic_stream(self, prompt: str):
-        """Generate answer using Anthropic Claude with streaming"""
-        if self.client is None:
-            yield "Error: Anthropic client not initialized"
-            return
-
-        try:
-            with self.client.messages.stream(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            ) as stream:
-                for text in stream.text_stream:
-                    yield text
-
-        except Exception as e:
-            self.logger.error(f"Anthropic streaming API error: {e}")
-            yield f"\n\nError: {str(e)}"
-
     def _parse_response_with_summary(self, raw_response: str) -> Tuple[str, Optional[str]]:
         """
         Parse LLM response to extract answer and summary
