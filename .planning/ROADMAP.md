@@ -88,7 +88,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 05-01-PLAN.md — Fix answer_generator.py wiring, clean requirements.txt, update .env.example
+- [ ] 05-01-PLAN.md — Fix answer_generator.py count_tokens wiring, MODEL fallback, remove dead deps, document LITELLM_MODEL in .env.example
 
 ## Progress
 
