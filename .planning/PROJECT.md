@@ -1,8 +1,18 @@
 # FastCode — LiteLLM Provider Migration
 
+## Current Milestone: v1.1 VertexAI Embedding Migration
+
+**Goal:** Replace sentence-transformers with VertexAI gemini-embedding-001 via litellm, completing the GCP-native routing story for both text generation and embeddings.
+
+**Target features:**
+- `fastcode/embedder.py` rewritten to call `litellm.embedding()` with `vertex_ai/gemini-embedding-001`
+- Differentiated `task_type`: `RETRIEVAL_DOCUMENT` at index time, `RETRIEVAL_QUERY` at query time
+- Remove `sentence-transformers` and `torch` from dependencies
+- Smoke test for embedding via ADC (parallel to v1.0 LLM smoke test)
+
 ## What This Is
 
-FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM calls through litellm, enabling VertexAI on GCP via Application Default Credentials. The v1.0 migration replaced direct openai/anthropic Python clients across all five LLM call sites (`answer_generator.py`, `query_processor.py`, `iterative_agent.py`, `repo_overview.py`, `repo_selector.py`) with a centralized `fastcode/llm_client.py` module.
+FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM calls through litellm, enabling VertexAI on GCP via Application Default Credentials. The v1.0 migration replaced direct openai/anthropic Python clients across all five LLM call sites with a centralized `fastcode/llm_client.py` module. v1.1 extends this to embeddings — replacing the local sentence-transformers model with VertexAI gemini-embedding-001.
 
 ## Core Value
 
@@ -29,13 +39,16 @@ All LLM calls in FastCode route through litellm, so the system works with Vertex
 
 ### Active
 
-*(Define with `/gsd:new-milestone` for next milestone)*
+- [ ] Replace `CodeEmbedder` sentence-transformers backend with `litellm.embedding()` calling `vertex_ai/gemini-embedding-001`
+- [ ] Pass `task_type=RETRIEVAL_DOCUMENT` when indexing, `task_type=RETRIEVAL_QUERY` when embedding queries
+- [ ] Remove `sentence-transformers` and `torch` from `requirements.txt`
+- [ ] Add ADC embedding smoke test
 
 ### Out of Scope
 
 - Nanobot changes — Nanobot already uses litellm via its own provider
-- Embedding model changes — sentence-transformers stays as-is (not an LLM call)
-- New features beyond provider swap — no new retrieval strategies, UI changes, etc.
+- Retrieval strategy changes — FAISS/BM25/graph weights stay as-is; only the embedding backend changes
+- New retrieval features — no new retrieval strategies, UI changes, etc.
 - Multiple simultaneous providers — one active provider at a time is sufficient
 - Offline mode — real-time generation is core
 - Gemini-native tokenizer in `truncate_to_tokens` — litellm token_counter used for count accuracy; tiktoken cl100k_base used for encode/decode truncation (close enough for context window management)
@@ -53,7 +66,8 @@ FastCode's LLM calls route through `fastcode/llm_client.py`. Package is ~16,600 
 - **Backward compatibility**: Existing config.yaml and .env patterns still work — only env var names changed (`MODEL`, `LITELLM_MODEL` instead of OpenAI API key)
 - **Streaming**: `answer_generator.py` streaming preserved via `litellm.completion_stream()` + `choices[0].delta.content` chunk format
 - **Docker**: Container deployment works with ADC (mount `~/.config/gcloud` or use workload identity)
-- **No new embedding dependencies**: Only LLM text generation calls migrated
+- **No new embedding dependencies**: v1.1 removes sentence-transformers/torch; litellm already present
+- **FAISS index reindex required**: embedding dimension changes (384 → 768); existing persisted indexes must be cleared on first run
 
 ## Key Decisions
 
@@ -72,4 +86,4 @@ FastCode's LLM calls route through `fastcode/llm_client.py`. Package is ~16,600 
 | `litellm.num_retries = 3` global | Transient VertexAI errors auto-retried without per-call config | ✓ Good — set alongside other globals in llm_client.py |
 
 ---
-*Last updated: 2026-02-25 after v1.0 milestone*
+*Last updated: 2026-02-25 after v1.1 milestone start*

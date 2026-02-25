@@ -5,16 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Planning next milestone — run `/gsd:new-milestone` to begin
+**Current focus:** Milestone v1.1 — VertexAI Embedding Migration
 
 ## Current Position
 
-Phase: 5 of 5 (Fix answer_generator.py Wiring and Cleanup)
-Plan: 1 of 1 in current phase (05-01 complete)
-Status: Phase 5 complete
-Last activity: 2026-02-25 — Plan 05-01 completed
-
-Progress: [██████████] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-25 — Milestone v1.1 started
 
 ## Performance Metrics
 
