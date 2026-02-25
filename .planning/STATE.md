@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-24)
 ## Current Position
 
 Phase: 4 of 4 (Streaming Migration and Finalization)
-Plan: 2 of 4 in current phase (04-02 complete)
-Status: In progress
-Last activity: 2026-02-25 — Plan 04-02 completed
+Plan: 2 of 2 in current phase (04-01 complete)
+Status: Phase 4 complete
+Last activity: 2026-02-25 — Plan 04-01 completed
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -38,6 +38,7 @@ Progress: [█████████░] 90%
 *Updated after each plan completion*
 | Phase 03-non-streaming-migration P04 | 2min | 2 tasks | 1 files |
 | Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
+| Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,10 @@ Recent decisions affecting current work:
 - [Phase 03-04]: openai/anthropic kept in requirements.txt — answer_generator.py still imports them; deferred to Phase 4
 - [04-02]: No replacement for deleted provider field — litellm routing controlled entirely by MODEL env var prefix (vertex_ai/...)
 - [04-02]: All BASE_URL references removed from .env.example — litellm vertex_ai/ prefix + ADC handles endpoint routing without manual base URL
+- [04-01]: os import kept in answer_generator.py — still needed for os.getenv('MODEL') in __init__
+- [04-01]: raw_response variable name preserved in generate() — used downstream by _parse_response_with_summary() in multi-turn mode
+- [04-01]: None-guard (or '' + if not chunk_text: continue) applied to both streaming loops per RESEARCH.md litellm pitfall
+- [04-01]: _stream_with_summary_filter() chunk variable is plain string (same type as before) — buffering/regex logic unchanged
 
 ### Pending Todos
 
@@ -80,10 +85,10 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 4]: `_stream_with_summary_filter()` chunk boundary behavior with litellm needs empirical testing — litellm chunk sizes may differ from Anthropic's granularity
-- [Phase 3/4]: 1 file still imports from deleted llm_utils (answer_generator.py) — must be migrated before app is functional; all 4 Phase 3 files now fixed
+- [RESOLVED]: answer_generator.py was last file importing from deleted llm_utils — now migrated; runtime ImportError eliminated
 
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 04-02-PLAN.md — config.yaml and .env.example cleaned of provider-specific fields; config now accurately reflects litellm/VertexAI-only architecture
+Stopped at: Completed 04-01-PLAN.md — answer_generator.py fully migrated to llm_client; all LLM call sites use llm_client.completion() and llm_client.completion_stream(); runtime ImportError eliminated; Phase 4 complete
 Resume file: None

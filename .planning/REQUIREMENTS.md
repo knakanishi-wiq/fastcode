@@ -22,9 +22,9 @@
 
 ### Streaming Migration
 
-- [ ] **STRM-01**: `answer_generator.py` non-streaming `generate()` uses litellm via `llm_client`
-- [ ] **STRM-02**: `answer_generator.py` streaming `generate_stream()` uses litellm via `llm_client`
-- [ ] **STRM-03**: `_stream_with_summary_filter()` works correctly with litellm chunk format
+- [x] **STRM-01**: `answer_generator.py` non-streaming `generate()` uses litellm via `llm_client`
+- [x] **STRM-02**: `answer_generator.py` streaming `generate_stream()` uses litellm via `llm_client`
+- [x] **STRM-03**: `_stream_with_summary_filter()` works correctly with litellm chunk format
 
 ### Configuration & Auth
 
@@ -76,9 +76,9 @@
 | MIGR-03 | Phase 3 | Complete |
 | MIGR-04 | Phase 3 | Complete |
 | MIGR-05 | Phase 3 | Complete |
-| STRM-01 | Phase 4 | Pending |
-| STRM-02 | Phase 4 | Pending |
-| STRM-03 | Phase 4 | Pending |
+| STRM-01 | Phase 4 | Complete |
+| STRM-02 | Phase 4 | Complete |
+| STRM-03 | Phase 4 | Complete |
 | CONF-03 | Phase 4 | Complete |
 
 **Coverage:**
