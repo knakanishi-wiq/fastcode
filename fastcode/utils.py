@@ -101,18 +101,21 @@ def count_tokens(text: str, model: str = "gpt-4") -> int:
 
 
 def truncate_to_tokens(text: str, max_tokens: int, model: str = "gpt-4") -> str:
-    """Truncate text to fit within token limit"""
+    """Truncate text to fit within token limit."""
     try:
         encoding = tiktoken.encoding_for_model(model)
+        tokens = encoding.encode(text, disallowed_special=())
+        if len(tokens) <= max_tokens:
+            return text
+        return encoding.decode(tokens[:max_tokens])
     except KeyError:
-        encoding = tiktoken.get_encoding("cl100k_base")
-    
-    tokens = encoding.encode(text, disallowed_special=())
-    if len(tokens) <= max_tokens:
-        return text
-    
-    truncated_tokens = tokens[:max_tokens]
-    return encoding.decode(truncated_tokens)
+        # Unknown model (e.g. vertex_ai/...): use litellm for accurate counting,
+        # then a proportional character estimate for the cut point.
+        from litellm import token_counter as _token_counter
+        total = _token_counter(model=model, text=text)
+        if total <= max_tokens:
+            return text
+        return text[:int(len(text) * max_tokens / total)]
 
 
 def normalize_path(path: str) -> str:

@@ -23,6 +23,7 @@ from litellm import token_counter as _token_counter
 # --- Module-level configuration (applied once at import) ---
 litellm.drop_params = True
 litellm.suppress_debug_info = True
+litellm.num_retries = 3
 
 # --- Environment validation (fail fast, not at first call) ---
 _project = os.environ.get("VERTEXAI_PROJECT")

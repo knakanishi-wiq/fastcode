@@ -33,6 +33,18 @@ class TestVertexAISmoke:
         )
         assert response.model is not None, "Expected response.model to be set"
 
+    @pytest.mark.skipif(
+        not os.environ.get("VERTEXAI_PROJECT"),
+        reason="VERTEXAI_PROJECT not set — skipping live test",
+    )
+    def test_streaming_yields_chunks(self):
+        """generate_stream() yields at least one non-empty text chunk via litellm."""
+        from fastcode.answer_generator import AnswerGenerator
+
+        ag = AnswerGenerator(config={"generation": {}})
+        chunks = [text for text, _ in ag.generate_stream("Say hello in one word.", [])]
+        assert any(chunks), "Expected at least one non-empty text chunk from generate_stream()"
+
     def test_missing_project_raises_config_error(self, monkeypatch):
         """When VERTEXAI_PROJECT is unset, litellm should raise a configuration
         error (not a 401) so the caller knows what to fix."""
