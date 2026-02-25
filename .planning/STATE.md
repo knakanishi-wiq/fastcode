@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: 06-embedder-migration
-Plan: 01 complete
-Status: Phase 6 Plan 1 complete
-Last activity: 2026-02-25 — Phase 6 Plan 1 complete: embedder migrated to litellm/VertexAI
+Phase: 07-dependency-cleanup-and-smoke-test
+Plan: 02 complete
+Status: Phase 7 Plan 2 complete — phase complete
+Last activity: 2026-02-25 — Phase 7 Plan 2 complete: embedder smoke test added for litellm/VertexAI ADC path
 
 ## Performance Metrics
 
@@ -39,6 +39,8 @@ Last activity: 2026-02-25 — Phase 6 Plan 1 complete: embedder migrated to lite
 | Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
 | Phase 05-fix-answer-generator-wiring-and-cleanup P01 | 3min | 2 tasks | 3 files |
 | Phase 06-embedder-migration P01 | 3min | 3 tasks | 3 files |
+| Phase 07-dependency-cleanup-and-smoke-test P01 | 2min | 2 tasks | 3 files |
+| Phase 07-dependency-cleanup-and-smoke-test P02 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -85,6 +87,10 @@ Recent decisions affecting current work:
 - [Phase 06-01]: embedding_dim=3072 read from config at init — no HTTP call at init time
 - [Phase 06-01]: embed_text() defaults task_type to RETRIEVAL_QUERY so retriever.py callers require zero changes
 - [Phase 06-01]: item["embedding"] dict-style access used (not item.embedding) for litellm version safety
+- [Phase 07-01]: R8+R10 committed atomically to prevent config-absent deploy window with missing sentence-transformers package
+- [Phase 07-01]: ENV TOKENIZERS_PARALLELISM=false left in Dockerfile — harmless no-op, out of R9 scope
+- [Phase 07-02]: load_dotenv() at module level means test runs live in dev (.env has VERTEXAI_PROJECT) and skips in CI (no .env) — consistent with test_vertexai_smoke.py pattern
+- [Phase 07-02]: CodeEmbedder imported inside test method to avoid import-time side effects in skipped environments
 
 ### Pending Todos
 
@@ -98,5 +104,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 06-01-PLAN.md — CodeEmbedder rewritten to use litellm.embedding() with vertex_ai/gemini-embedding-001; torch/sentence-transformers eliminated; config embedding section updated; indexer.py call site updated with task_type=RETRIEVAL_DOCUMENT; Phase 6 Plan 1 complete
+Stopped at: Completed 07-02-PLAN.md — embedder smoke test added (TestEmbedderSmoke); asserts shape (3072,), all finite, L2 norm ≈ 1.0; skips in CI when VERTEXAI_PROJECT unset; Phase 7 complete
 Resume file: None

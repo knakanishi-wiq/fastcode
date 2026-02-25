@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 | 4. Streaming Migration and Finalization | v1.0 | 2/2 | Complete | 2026-02-25 |
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
 | 6. Embedder Migration | 1/1 | Complete   | 2026-02-25 | — |
-| 7. Dependency Cleanup and Smoke Test | v1.1 | 0/2 | Pending | — |
+| 7. Dependency Cleanup and Smoke Test | 2/2 | Complete   | 2026-02-25 | — |
 
 ---
 
@@ -64,7 +64,7 @@ Plans:
 
 **Goal:** Remove sentence-transformers from the dependency tree, clean up Dockerfile and main.py, add a smoke test that validates embedding via ADC.
 
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 07-01-PLAN.md — Remove sentence-transformers (requirements.txt R8+R10 atomic), update main.py defaults, strip Dockerfile pre-bake (R9)
