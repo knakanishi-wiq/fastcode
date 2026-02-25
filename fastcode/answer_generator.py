@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 
 from fastcode import llm_client
-from .utils import count_tokens, truncate_to_tokens
+from .utils import truncate_to_tokens
 
 
 class AnswerGenerator:
@@ -40,7 +40,7 @@ class AnswerGenerator:
         # Load environment variables from .env file
         load_dotenv()
 
-        self.model = os.getenv("MODEL")
+        self.model = os.getenv("MODEL") or llm_client.DEFAULT_MODEL
 
     def generate(self, query: str, retrieved_elements: List[Dict[str, Any]], 
                  query_info: Optional[Dict[str, Any]] = None,
@@ -72,7 +72,7 @@ class AnswerGenerator:
             prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
         # Count tokens
-        prompt_tokens = count_tokens(prompt, self.model)
+        prompt_tokens = llm_client.count_tokens(self.model, prompt)
         self.logger.info(f"Initial prompt tokens: {prompt_tokens}")
 
         # Calculate available tokens for input
@@ -89,7 +89,7 @@ class AnswerGenerator:
 
             # Calculate tokens for each component to determine how much context we can keep
             system_prompt_sample = self._build_prompt(query, "", query_info, dialogue_history)
-            base_tokens = count_tokens(system_prompt_sample, self.model)
+            base_tokens = llm_client.count_tokens(self.model, system_prompt_sample)
             context_token_budget = available_input_tokens - base_tokens - 100  # Extra safety margin
 
             if context_token_budget > 0:
@@ -110,7 +110,7 @@ class AnswerGenerator:
                 prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
             # Verify final token count
-            final_prompt_tokens = count_tokens(prompt, self.model)
+            final_prompt_tokens = llm_client.count_tokens(self.model, prompt)
             self.logger.info(f"Final prompt tokens after truncation: {final_prompt_tokens}")
             prompt_tokens = final_prompt_tokens
 
@@ -203,7 +203,7 @@ class AnswerGenerator:
             prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
         # Count tokens and truncate if needed (same logic as generate())
-        prompt_tokens = count_tokens(prompt, self.model)
+        prompt_tokens = llm_client.count_tokens(self.model, prompt)
         self.logger.info(f"Initial prompt tokens: {prompt_tokens}")
 
         available_input_tokens = self.max_context_tokens - self.max_tokens - self.reserve_tokens
@@ -214,7 +214,7 @@ class AnswerGenerator:
             )
 
             system_prompt_sample = self._build_prompt(query, "", query_info, dialogue_history)
-            base_tokens = count_tokens(system_prompt_sample, self.model)
+            base_tokens = llm_client.count_tokens(self.model, system_prompt_sample)
             context_token_budget = available_input_tokens - base_tokens - 100
 
             if context_token_budget > 0:
@@ -229,7 +229,7 @@ class AnswerGenerator:
             else:
                 prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
-            final_prompt_tokens = count_tokens(prompt, self.model)
+            final_prompt_tokens = llm_client.count_tokens(self.model, prompt)
             self.logger.info(f"Final prompt tokens after truncation: {final_prompt_tokens}")
             prompt_tokens = final_prompt_tokens
 
