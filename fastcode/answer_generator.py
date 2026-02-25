@@ -116,13 +116,17 @@ class AnswerGenerator:
 
         # Generate answer
         try:
-            if self.provider == "openai":
-                raw_response = self._generate_openai(prompt)
-            elif self.provider == "anthropic":
-                raw_response = self._generate_anthropic(prompt)
-            else:
-                raw_response = "Error: LLM provider not configured"
-            # print("raw_response: ", raw_response)
+            response = llm_client.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            if not response or not getattr(response, "choices", None):
+                raise ValueError(f"Empty response or no choices returned: {response}")
+            raw_response = response.choices[0].message.content
+            if raw_response is None:
+                raise ValueError(f"LLM response has no content: {response}")
             
             # # Save raw_response to JSON file
             # test_data = {"answer": raw_response}
@@ -256,17 +260,18 @@ class AnswerGenerator:
                         yield filtered_chunk, None
             else:
                 # Normal streaming without filtering
-                if self.provider == "openai":
-                    for chunk in self._generate_openai_stream(prompt):
-                        full_response.append(chunk)
-                        yield chunk, None
-                elif self.provider == "anthropic":
-                    for chunk in self._generate_anthropic_stream(prompt):
-                        full_response.append(chunk)
-                        yield chunk, None
-                else:
-                    error_msg = "Error: LLM provider not configured"
-                    yield error_msg, None
+                stream = llm_client.completion_stream(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                for raw_chunk in stream:
+                    chunk_text = raw_chunk.choices[0].delta.content or ""
+                    if not chunk_text:
+                        continue
+                    full_response.append(chunk_text)
+                    yield chunk_text, None
 
             # Parse complete response for summary (multi-turn mode)
             raw_response = "".join(full_response)
@@ -322,16 +327,17 @@ class AnswerGenerator:
         in_summary = False
         max_buffer_size = 20  # Buffer enough to detect "<SUMMARY>"
 
-        # Choose stream generator based on provider
-        if self.provider == "openai":
-            stream_generator = self._generate_openai_stream(prompt)
-        elif self.provider == "anthropic":
-            stream_generator = self._generate_anthropic_stream(prompt)
-        else:
-            yield "Error: LLM provider not configured", "Error: LLM provider not configured"
-            return
+        stream_generator = llm_client.completion_stream(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
 
-        for chunk in stream_generator:
+        for raw_chunk in stream_generator:
+            chunk = raw_chunk.choices[0].delta.content or ""
+            if not chunk:
+                continue
             # Always yield original chunk for full response tracking
             original_chunk = chunk
 
