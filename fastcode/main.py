@@ -845,9 +845,10 @@ class FastCode:
                 "extract_imports": True,
             },
             "embedding": {
-                "model": "sentence-transformers/all-MiniLM-L6-v2",
-                "device": "cpu",
+                "model": "vertex_ai/gemini-embedding-001",
+                "embedding_dim": 3072,
                 "batch_size": 32,
+                "normalize_embeddings": True,
             },
             "indexing": {
                 "levels": ["file", "class", "function", "documentation"],
