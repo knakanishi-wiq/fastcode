@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-24)
 
 **Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Phase 3 — Non-Streaming Migration
+**Current focus:** Phase 4 — Streaming Migration and Finalization
 
 ## Current Position
 
-Phase: 3 of 4 (Non-Streaming Migration)
-Plan: 4 of 4 in current phase (03-04 complete)
-Status: Phase 3 complete
-Last activity: 2026-02-24 — Plan 03-04 completed
+Phase: 4 of 4 (Streaming Migration and Finalization)
+Plan: 2 of 4 in current phase (04-02 complete)
+Status: In progress
+Last activity: 2026-02-25 — Plan 04-02 completed
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -37,6 +37,7 @@ Progress: [████████░░] 80%
 
 *Updated after each plan completion*
 | Phase 03-non-streaming-migration P04 | 2min | 2 tasks | 1 files |
+| Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Recent decisions affecting current work:
 - [Phase 03-04]: os import kept in iterative_agent.py — used for path operations throughout ~3200-line file
 - [Phase 03-04]: System message in messages list (not system= kwarg) for litellm/Gemini/VertexAI compatibility
 - [Phase 03-04]: openai/anthropic kept in requirements.txt — answer_generator.py still imports them; deferred to Phase 4
+- [04-02]: No replacement for deleted provider field — litellm routing controlled entirely by MODEL env var prefix (vertex_ai/...)
+- [04-02]: All BASE_URL references removed from .env.example — litellm vertex_ai/ prefix + ADC handles endpoint routing without manual base URL
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-24
-Stopped at: Completed 03-04-PLAN.md — iterative_agent.py migrated to llm_client; all four Phase 3 files clean; answer_generator.py remains for Phase 4
+Last session: 2026-02-25
+Stopped at: Completed 04-02-PLAN.md — config.yaml and .env.example cleaned of provider-specific fields; config now accurately reflects litellm/VertexAI-only architecture
 Resume file: None

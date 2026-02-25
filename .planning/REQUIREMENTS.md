@@ -30,7 +30,7 @@
 
 - [x] **CONF-01**: `requirements.txt` includes `litellm[google]` with version pin
 - [x] **CONF-02**: `.env.example` documents VertexAI vars: `VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`, model name format
-- [ ] **CONF-03**: `config.yaml` cleaned of provider-specific sections (no more `openai`/`anthropic` branches)
+- [x] **CONF-03**: `config.yaml` cleaned of provider-specific sections (no more `openai`/`anthropic` branches)
 - [x] **CONF-04**: VertexAI works with ADC authentication (`gcloud auth application-default login`)
 
 ### Token Counting
@@ -79,7 +79,7 @@
 | STRM-01 | Phase 4 | Pending |
 | STRM-02 | Phase 4 | Pending |
 | STRM-03 | Phase 4 | Pending |
-| CONF-03 | Phase 4 | Pending |
+| CONF-03 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 17 total
