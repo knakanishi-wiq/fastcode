@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-24)
 
 **Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Phase 4 — Streaming Migration and Finalization
+**Current focus:** Phase 5 — Fix answer_generator.py Wiring and Cleanup
 
 ## Current Position
 
-Phase: 4 of 4 (Streaming Migration and Finalization)
-Plan: 2 of 2 in current phase (04-01 complete)
-Status: Phase 4 complete
-Last activity: 2026-02-25 — Plan 04-01 completed
+Phase: 5 of 5 (Fix answer_generator.py Wiring and Cleanup)
+Plan: 1 of 1 in current phase (05-01 complete)
+Status: Phase 5 complete
+Last activity: 2026-02-25 — Plan 05-01 completed
 
 Progress: [██████████] 100%
 
@@ -39,6 +39,7 @@ Progress: [██████████] 100%
 | Phase 03-non-streaming-migration P04 | 2min | 2 tasks | 1 files |
 | Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
 | Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
+| Phase 05-fix-answer-generator-wiring-and-cleanup P01 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,10 @@ Recent decisions affecting current work:
 - [04-01]: raw_response variable name preserved in generate() — used downstream by _parse_response_with_summary() in multi-turn mode
 - [04-01]: None-guard (or '' + if not chunk_text: continue) applied to both streaming loops per RESEARCH.md litellm pitfall
 - [04-01]: _stream_with_summary_filter() chunk variable is plain string (same type as before) — buffering/regex logic unchanged
+- [05-01]: count_tokens removed from utils import in answer_generator.py — fully routed through llm_client module
+- [05-01]: MODEL fallback uses llm_client.DEFAULT_MODEL (not hardcoded string) — single source of truth for default model
+- [05-01]: openai and anthropic removed from requirements.txt — no fastcode/ file imports them post-Phase 4
+- [05-01]: .env.example MODEL updated from placeholder to vertex_ai/ prefix example; LITELLM_MODEL entry added
 
 ### Pending Todos
 
@@ -90,5 +95,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 04-01-PLAN.md — answer_generator.py fully migrated to llm_client; all LLM call sites use llm_client.completion() and llm_client.completion_stream(); runtime ImportError eliminated; Phase 4 complete
+Stopped at: Completed 05-01-PLAN.md — answer_generator.py fully wired to llm_client token counting; 6 count_tokens call sites fixed; MODEL=None risk eliminated; dead openai/anthropic deps removed; Phase 5 complete
 Resume file: None
