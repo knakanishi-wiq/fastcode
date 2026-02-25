@@ -2,10 +2,10 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-24)
+See: .planning/PROJECT.md (updated 2026-02-25)
 
 **Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Phase 5 — Fix answer_generator.py Wiring and Cleanup
+**Current focus:** Planning next milestone — run `/gsd:new-milestone` to begin
 
 ## Current Position
 
