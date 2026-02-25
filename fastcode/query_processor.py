@@ -6,12 +6,8 @@ import re
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-import os
-from openai import OpenAI
-from anthropic import Anthropic
-from dotenv import load_dotenv
 
-from .llm_utils import openai_chat_completion
+from fastcode import llm_client
 
 
 @dataclass
@@ -67,20 +63,8 @@ class QueryProcessor:
         self.max_summary_words = self.query_config.get("max_summary_words", 250)
 
         # LLM settings
-        load_dotenv()
-        self.provider = self.gen_config.get("provider", "openai")
-        self.model = os.getenv("MODEL")
         self.temperature = 0.3  # Slightly higher for creative query expansion
         self.max_tokens = 2000  # Shorter responses for query processing
-        
-        # Initialize LLM client
-        if self.use_llm_enhancement:
-            self.api_key = os.getenv("OPENAI_API_KEY")
-            self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-            self.base_url = os.getenv("BASE_URL")
-            self.llm_client = self._initialize_llm_client()
-        else:
-            self.llm_client = None
         
         # Intent keywords
         self.intent_patterns = {
@@ -101,30 +85,6 @@ class QueryProcessor:
             "authentication", "auth", "login", "user", "session",
             "test", "unittest", "spec", "testing",
         }
-    
-    def _initialize_llm_client(self):
-        """Initialize LLM client for query enhancement"""
-        try:
-            if self.provider == "openai":
-                api_key = self.api_key
-                if not api_key:
-                    self.logger.warning("OPENAI_API_KEY not set, LLM enhancement disabled")
-                    return None
-                return OpenAI(api_key=api_key, base_url=self.base_url)
-            
-            elif self.provider == "anthropic":
-                api_key = self.anthropic_api_key
-                if not api_key:
-                    self.logger.warning("ANTHROPIC_API_KEY not set, LLM enhancement disabled")
-                    return None
-                return Anthropic(api_key=api_key, base_url=self.base_url)
-            
-            else:
-                self.logger.warning(f"Unknown provider: {self.provider}, LLM enhancement disabled")
-                return None
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize LLM client: {e}, LLM enhancement disabled")
-            return None
     
     def process(
         self,
@@ -468,7 +428,7 @@ class QueryProcessor:
         Returns:
             True if LLM enhancement should be applied
         """
-        if not self.use_llm_enhancement or self.llm_client is None:
+        if not self.use_llm_enhancement:
             return False
         
         # Mode: always use LLM
@@ -526,12 +486,7 @@ class QueryProcessor:
         prompt = self._build_enhancement_prompt(query, intent, keywords, filters)
         
         try:
-            if self.provider == "openai":
-                response = self._call_openai(prompt)
-            elif self.provider == "anthropic":
-                response = self._call_anthropic(prompt)
-            else:
-                return {}
+            response = self._call_llm(prompt)
 
             print(f"LLM response of _enhance_with_llm: {response}")
             
@@ -589,26 +544,15 @@ Be concise and focus on improving code retrieval accuracy."""
         
         return prompt
     
-    def _call_openai(self, prompt: str) -> str:
-        """Call OpenAI API for query enhancement"""
-        response = openai_chat_completion(
-            self.llm_client,
-            model=self.model,
+    def _call_llm(self, prompt: str) -> str:
+        """Call LLM via llm_client for query enhancement"""
+        response = llm_client.completion(
+            model=llm_client.DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
             max_tokens=self.max_tokens,
         )
         return response.choices[0].message.content
-    
-    def _call_anthropic(self, prompt: str) -> str:
-        """Call Anthropic API for query enhancement"""
-        response = self.llm_client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.content[0].text
     
     def _parse_llm_response(self, response: str, original_intent: str) -> Dict[str, Any]:
         """
@@ -737,8 +681,8 @@ Be concise and focus on improving code retrieval accuracy."""
         Returns:
             Rewritten query with resolved references
         """
-        if not self.llm_client:
-            self.logger.warning("LLM client not available, skipping reference resolution")
+        if not self.use_llm_enhancement:
+            self.logger.warning("LLM enhancement disabled, skipping reference resolution")
             return query
         
         try:
@@ -749,12 +693,7 @@ Be concise and focus on improving code retrieval accuracy."""
             prompt = self._build_reference_resolution_prompt(query, recent_summaries)
             
             # Call LLM
-            if self.provider == "openai":
-                response = self._call_openai(prompt)
-            elif self.provider == "anthropic":
-                response = self._call_anthropic(prompt)
-            else:
-                return query
+            response = self._call_llm(prompt)
             
             # Parse rewritten query
             rewritten_query = self._parse_rewritten_query(response)

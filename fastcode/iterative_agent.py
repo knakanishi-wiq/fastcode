@@ -7,13 +7,10 @@ import logging
 import os
 import re
 from typing import List, Dict, Any, Optional, Tuple
-from openai import OpenAI
-from anthropic import Anthropic
-from dotenv import load_dotenv
 import numpy as np
 
+from fastcode import llm_client
 from .agent_tools import AgentTools
-from .llm_utils import openai_chat_completion
 from .path_utils import PathUtils
 
 
@@ -64,42 +61,12 @@ class IterativeAgent:
         self.confidence_threshold = self.base_confidence_threshold
         self.adaptive_line_budget = self.max_total_lines
         
-        # LLM settings
-        load_dotenv()
-        self.provider = self.gen_config.get("provider", "openai")
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.base_url = os.getenv("BASE_URL")
-        self.model = os.getenv("MODEL")
-
-        
-        # Initialize LLM client
-        self.client = self._initialize_client()
-        
         # Repo statistics (will be set later)
         self.repo_stats = None
         
         # Iteration history
         self.iteration_history = []
         self.tool_call_history = []
-    
-    def _initialize_client(self):
-        """Initialize LLM client based on provider"""
-        if self.provider == "openai":
-            api_key = self.api_key
-            if not api_key:
-                self.logger.warning("OPENAI_API_KEY not set")
-            return OpenAI(api_key=api_key, base_url=self.base_url)
-        
-        elif self.provider == "anthropic":
-            api_key = self.anthropic_api_key
-            if not api_key:
-                self.logger.warning("ANTHROPIC_API_KEY not set")
-            return Anthropic(api_key=api_key, base_url=self.base_url)
-        
-        else:
-            self.logger.warning(f"Unknown provider: {self.provider}")
-            return None
     
     def set_repo_stats(self, repo_stats: Dict[str, Any]):
         """Set repository statistics for cost calculation"""
@@ -2470,58 +2437,28 @@ If continuing (confidence < {self.confidence_threshold} and budget available):
         return total
     
     def _call_llm(self, prompt: str) -> str:
-        """Call LLM with prompt"""
+        """Call LLM via llm_client for iterative retrieval decisions.
+
+        System message is passed in the messages list. litellm converts it to
+        Gemini's systemInstruction field automatically when using vertex_ai/ prefix.
+        Do NOT pass system= as a kwarg — it may be silently dropped by litellm.
+        """
         self.logger.info(f"Calling LLM: prompt_len={len(prompt)}, max_tokens={self.max_tokens}")
-
-        if self.provider == "openai":
-            response = openai_chat_completion(
-                self.client,
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a precise code analysis agent. Respond in specified format only."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            if not response or not getattr(response, "choices", None):
-                raise ValueError(f"Empty response: {response}")
-
-            finish_reason = getattr(response.choices[0], 'finish_reason', 'unknown')
-            content = response.choices[0].message.content
-            self.logger.info(f"LLM response: content_len={len(content) if content else 0}, finish_reason={finish_reason}")
-
-            if content is None or content == "":
-                self.logger.error(f"Empty content: finish_reason={finish_reason}, prompt_len={len(prompt)}")
-                raise ValueError("No content in response")
-
-            return content
-
-        elif self.provider == "anthropic":
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                system="You are a precise code analysis agent. Respond in specified format only.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            if not response or not getattr(response, "content", None):
-                raise ValueError(f"Empty response: {response}")
-
-            stop_reason = getattr(response, 'stop_reason', 'unknown')
-            text = response.content[0].text if response.content else None
-            self.logger.info(f"LLM response: content_len={len(text) if text else 0}, stop_reason={stop_reason}")
-
-            if text is None or text == "":
-                self.logger.error(f"Empty content: stop_reason={stop_reason}, prompt_len={len(prompt)}")
-                raise ValueError(f"No text in response: {response}")
-
-            return text
-
-        else:
-            raise ValueError(f"Unknown provider: {self.provider}")
+        response = llm_client.completion(
+            model=llm_client.DEFAULT_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a precise code analysis agent. Respond in specified format only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        if not response or not getattr(response, "choices", None):
+            raise ValueError(f"Empty response from LLM: {response}")
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("LLM returned empty content in response")
+        return content
 
     # ==================== Methods moved from AccurateSearchAgent ====================
     

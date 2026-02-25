@@ -7,12 +7,10 @@ import re
 import json
 from typing import List, Dict, Any, Optional, Tuple, Callable
 import os
-from openai import OpenAI
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
-from .llm_utils import openai_chat_completion
-from .utils import count_tokens, truncate_to_tokens
+from fastcode import llm_client
+from .utils import truncate_to_tokens
 
 
 class AnswerGenerator:
@@ -23,9 +21,6 @@ class AnswerGenerator:
         self.gen_config = config.get("generation", {})
         self.logger = logging.getLogger(__name__)
         
-        self.provider = self.gen_config.get("provider", "openai")
-        # self.model = self.gen_config.get("model", "openai/gpt-oss-120b")
-        # self.base_url = self.gen_config.get("base_url", "https://openrouter.ai/api/v1")
         self.temperature = self.gen_config.get("temperature", 0.4)
         self.max_tokens = self.gen_config.get("max_tokens", 20000)
 
@@ -42,32 +37,9 @@ class AnswerGenerator:
         
         # Load environment variables from .env file
         load_dotenv()
-        
-        # Initialize LLM client
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.base_url = os.getenv("BASE_URL")
-        self.model = os.getenv("MODEL")
-        self.client = self._initialize_client()
 
-    def _initialize_client(self):
-        """Initialize LLM client based on provider"""
-        if self.provider == "openai":
-            api_key = self.api_key
-            if not api_key:
-                self.logger.warning("OPENAI_API_KEY not set")
-            return OpenAI(api_key=api_key, base_url=self.base_url)
-        
-        elif self.provider == "anthropic":
-            api_key = self.anthropic_api_key
-            if not api_key:
-                self.logger.warning("ANTHROPIC_API_KEY not set")
-            return Anthropic(api_key=api_key, base_url=self.base_url)
-        
-        else:
-            self.logger.warning(f"Unknown provider: {self.provider}")
-            return None
-    
+        self.model = os.getenv("MODEL") or llm_client.DEFAULT_MODEL
+
     def generate(self, query: str, retrieved_elements: List[Dict[str, Any]], 
                  query_info: Optional[Dict[str, Any]] = None,
                  dialogue_history: Optional[List[Dict[str, Any]]] = None,
@@ -98,7 +70,7 @@ class AnswerGenerator:
             prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
         # Count tokens
-        prompt_tokens = count_tokens(prompt, self.model)
+        prompt_tokens = llm_client.count_tokens(self.model, prompt)
         self.logger.info(f"Initial prompt tokens: {prompt_tokens}")
 
         # Calculate available tokens for input
@@ -115,7 +87,7 @@ class AnswerGenerator:
 
             # Calculate tokens for each component to determine how much context we can keep
             system_prompt_sample = self._build_prompt(query, "", query_info, dialogue_history)
-            base_tokens = count_tokens(system_prompt_sample, self.model)
+            base_tokens = llm_client.count_tokens(self.model, system_prompt_sample)
             context_token_budget = available_input_tokens - base_tokens - 100  # Extra safety margin
 
             if context_token_budget > 0:
@@ -136,19 +108,23 @@ class AnswerGenerator:
                 prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
             # Verify final token count
-            final_prompt_tokens = count_tokens(prompt, self.model)
+            final_prompt_tokens = llm_client.count_tokens(self.model, prompt)
             self.logger.info(f"Final prompt tokens after truncation: {final_prompt_tokens}")
             prompt_tokens = final_prompt_tokens
 
         # Generate answer
         try:
-            if self.provider == "openai":
-                raw_response = self._generate_openai(prompt)
-            elif self.provider == "anthropic":
-                raw_response = self._generate_anthropic(prompt)
-            else:
-                raw_response = "Error: LLM provider not configured"
-            # print("raw_response: ", raw_response)
+            response = llm_client.completion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            if not response or not getattr(response, "choices", None):
+                raise ValueError(f"Empty response or no choices returned: {response}")
+            raw_response = response.choices[0].message.content
+            if raw_response is None:
+                raise ValueError(f"LLM response has no content: {response}")
             
             # # Save raw_response to JSON file
             # test_data = {"answer": raw_response}
@@ -225,7 +201,7 @@ class AnswerGenerator:
             prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
         # Count tokens and truncate if needed (same logic as generate())
-        prompt_tokens = count_tokens(prompt, self.model)
+        prompt_tokens = llm_client.count_tokens(self.model, prompt)
         self.logger.info(f"Initial prompt tokens: {prompt_tokens}")
 
         available_input_tokens = self.max_context_tokens - self.max_tokens - self.reserve_tokens
@@ -236,7 +212,7 @@ class AnswerGenerator:
             )
 
             system_prompt_sample = self._build_prompt(query, "", query_info, dialogue_history)
-            base_tokens = count_tokens(system_prompt_sample, self.model)
+            base_tokens = llm_client.count_tokens(self.model, system_prompt_sample)
             context_token_budget = available_input_tokens - base_tokens - 100
 
             if context_token_budget > 0:
@@ -251,7 +227,7 @@ class AnswerGenerator:
             else:
                 prompt = self._build_prompt(query, context, query_info, dialogue_history)
 
-            final_prompt_tokens = count_tokens(prompt, self.model)
+            final_prompt_tokens = llm_client.count_tokens(self.model, prompt)
             self.logger.info(f"Final prompt tokens after truncation: {final_prompt_tokens}")
             prompt_tokens = final_prompt_tokens
 
@@ -282,17 +258,18 @@ class AnswerGenerator:
                         yield filtered_chunk, None
             else:
                 # Normal streaming without filtering
-                if self.provider == "openai":
-                    for chunk in self._generate_openai_stream(prompt):
-                        full_response.append(chunk)
-                        yield chunk, None
-                elif self.provider == "anthropic":
-                    for chunk in self._generate_anthropic_stream(prompt):
-                        full_response.append(chunk)
-                        yield chunk, None
-                else:
-                    error_msg = "Error: LLM provider not configured"
-                    yield error_msg, None
+                stream = llm_client.completion_stream(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                for raw_chunk in stream:
+                    chunk_text = raw_chunk.choices[0].delta.content or ""
+                    if not chunk_text:
+                        continue
+                    full_response.append(chunk_text)
+                    yield chunk_text, None
 
             # Parse complete response for summary (multi-turn mode)
             raw_response = "".join(full_response)
@@ -348,16 +325,17 @@ class AnswerGenerator:
         in_summary = False
         max_buffer_size = 20  # Buffer enough to detect "<SUMMARY>"
 
-        # Choose stream generator based on provider
-        if self.provider == "openai":
-            stream_generator = self._generate_openai_stream(prompt)
-        elif self.provider == "anthropic":
-            stream_generator = self._generate_anthropic_stream(prompt)
-        else:
-            yield "Error: LLM provider not configured", "Error: LLM provider not configured"
-            return
+        stream_generator = llm_client.completion_stream(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
 
-        for chunk in stream_generator:
+        for raw_chunk in stream_generator:
+            chunk = raw_chunk.choices[0].delta.content or ""
+            if not chunk:
+                continue
             # Always yield original chunk for full response tracking
             original_chunk = chunk
 
@@ -632,108 +610,6 @@ Symbol Mappings:
         """Truncate context to fit within token limit"""
         return truncate_to_tokens(context, max_tokens, self.model)
     
-    def _generate_openai(self, prompt: str) -> str:
-        """Generate answer using OpenAI"""
-        if self.client is None:
-            return "Error: OpenAI client not initialized"
-
-        try:
-            response = openai_chat_completion(
-                self.client,
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            # print("response: ", response)
-
-            # Defensive checks because some providers may return partial/None payloads
-            if not response or not getattr(response, "choices", None):
-                raise ValueError(f"Empty response or no choices returned: {response}")
-            first_choice = response.choices[0]
-            message = getattr(first_choice, "message", None)
-            content = getattr(message, "content", None) if message else None
-            if content is None:
-                raise ValueError(f"LLM response has no content: {response}")
-            return content
-
-        except Exception as e:
-            self.logger.error(f"OpenAI API error: {e}")
-            raise
-
-    def _generate_openai_stream(self, prompt: str):
-        """Generate answer using OpenAI with streaming"""
-        if self.client is None:
-            yield "Error: OpenAI client not initialized"
-            return
-
-        try:
-            response = openai_chat_completion(
-                self.client,
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=True,
-            )
-
-            for chunk in response:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        yield delta.content
-
-        except Exception as e:
-            self.logger.error(f"OpenAI streaming API error: {e}")
-            yield f"\n\nError: {str(e)}"
-
-    def _generate_anthropic(self, prompt: str) -> str:
-        """Generate answer using Anthropic Claude"""
-        if self.client is None:
-            return "Error: Anthropic client not initialized"
-        
-        try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            # Defensive checks because some providers may return partial/None payloads
-            if not response or not getattr(response, "content", None):
-                raise ValueError(f"Empty response or no content returned: {response}")
-            first_block = response.content[0] if response.content else None
-            text = getattr(first_block, "text", None) if first_block else None
-            if text is None:
-                raise ValueError(f"LLM response has no text: {response}")
-            return text
-        
-        except Exception as e:
-            self.logger.error(f"Anthropic API error: {e}")
-            raise
-
-    def _generate_anthropic_stream(self, prompt: str):
-        """Generate answer using Anthropic Claude with streaming"""
-        if self.client is None:
-            yield "Error: Anthropic client not initialized"
-            return
-
-        try:
-            with self.client.messages.stream(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            ) as stream:
-                for text in stream.text_stream:
-                    yield text
-
-        except Exception as e:
-            self.logger.error(f"Anthropic streaming API error: {e}")
-            yield f"\n\nError: {str(e)}"
-
     def _parse_response_with_summary(self, raw_response: str) -> Tuple[str, Optional[str]]:
         """
         Parse LLM response to extract answer and summary

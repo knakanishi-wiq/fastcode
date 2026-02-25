@@ -29,9 +29,8 @@ rank-bm25
 networkx
 
 # LLM Integration
-openai
-anthropic
 tiktoken
+litellm[google]>=1.80.8    # Unified LLM client — VertexAI via ADC
 
 # API
 fastapi
