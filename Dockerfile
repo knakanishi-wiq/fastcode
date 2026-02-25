@@ -16,14 +16,10 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --retries 5 --timeout 60 -r requirements.txt
 
-# Pre-download the embedding model BEFORE copying app code
-# so that code changes don't invalidate this ~470MB cached layer
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
-
 # Create necessary directories
 RUN mkdir -p /app/repos /app/data /app/logs
 
-# Copy application code (changes here won't re-download the model)
+# Copy application code
 COPY fastcode/ fastcode/
 COPY api.py ./
 COPY config/ config/
