@@ -40,6 +40,11 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 **Goal:** Replace the sentence-transformers backend in `fastcode/embedder.py` with `litellm.embedding()` calling `vertex_ai/gemini-embedding-001`. Update config and the one indexer.py call site that embeds repo overviews.
 
+**Plans:** 1 plan
+
+Plans:
+- [ ] 06-01-PLAN.md — Rewrite CodeEmbedder (litellm backend), update config.yaml embedding section, 1-line indexer.py change
+
 **Delivers:**
 - `fastcode/embedder.py` — `CodeEmbedder` uses `litellm.embedding()` with `task_type` support; no torch/sentence-transformers imports
 - `config/config.yaml` — embedding section updated: new model, `embedding_dim: 3072`, `device`/`max_seq_length` removed
