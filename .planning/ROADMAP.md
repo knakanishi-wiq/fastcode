@@ -30,7 +30,7 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 | 4. Streaming Migration and Finalization | v1.0 | 2/2 | Complete | 2026-02-25 |
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
 | 6. Embedder Migration | 1/1 | Complete   | 2026-02-25 | — |
-| 7. Dependency Cleanup and Smoke Test | v1.1 | 0/1 | Pending | — |
+| 7. Dependency Cleanup and Smoke Test | v1.1 | 0/2 | Pending | — |
 
 ---
 
@@ -64,13 +64,19 @@ Plans:
 
 **Goal:** Remove sentence-transformers from the dependency tree, clean up Dockerfile and main.py, add a smoke test that validates embedding via ADC.
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Remove sentence-transformers (requirements.txt R8+R10 atomic), update main.py defaults, strip Dockerfile pre-bake (R9)
+- [ ] 07-02-PLAN.md — Create embedder smoke test (tests/test_embedder_smoke.py, R11)
+
 **Delivers:**
 - `requirements.txt` — `sentence-transformers` removed
 - `Dockerfile` — pre-bake model download line removed
 - `main.py` — default model string updated to `vertex_ai/gemini-embedding-001`
 - `tests/test_embedder_smoke.py` — new smoke test (skips without `VERTEXAI_PROJECT`)
 
-**Files changed:** `requirements.txt`, `Dockerfile`, `main.py`, `tests/test_embedder_smoke.py`
+**Files changed:** `requirements.txt`, `Dockerfile`, `fastcode/main.py`, `tests/test_embedder_smoke.py`
 
 **Success criteria:**
 - `pip install -r requirements.txt` does not install sentence-transformers or torch
