@@ -21,8 +21,6 @@ class AnswerGenerator:
         self.gen_config = config.get("generation", {})
         self.logger = logging.getLogger(__name__)
         
-        # self.model = self.gen_config.get("model", "openai/gpt-oss-120b")
-        # self.base_url = self.gen_config.get("base_url", "https://openrouter.ai/api/v1")
         self.temperature = self.gen_config.get("temperature", 0.4)
         self.max_tokens = self.gen_config.get("max_tokens", 20000)
 
