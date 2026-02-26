@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-26)
 ## Current Position
 
 Phase: 10 of 10 (v1.2 — Config Consolidation and Verification)
-Plan: 1 of 3 in current phase
-Status: Plan 01 complete
-Last activity: 2026-02-26 — Phase 10 Plan 01 complete (DEBT-04: MODEL env var removed; answer_generator.py now reads llm_client.DEFAULT_MODEL directly)
+Plan: 2 of 3 in current phase
+Status: Plan 02 complete
+Last activity: 2026-02-26 — Phase 10 Plan 02 complete (DEBT-03 and DEBT-05 resolved; live smoke tests verified against GCP)
 
-Progress: [█████████░] 90% (v1.0 + v1.1 complete; v1.2 Phases 8-10 Plans 01 complete)
+Progress: [█████████░] 95% (v1.0 + v1.1 complete; v1.2 Phases 8-10 Plans 01-02 complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15 (v1.0: 10 plans, v1.1: 3 plans, v1.2: 2 plans so far)
+- Total plans completed: 16 (v1.0: 10 plans, v1.1: 3 plans, v1.2: 3 plans so far)
 - Average duration: ~2–3 min/plan
 - Total execution time: ~0.6 hours
 
@@ -33,9 +33,10 @@ Progress: [█████████░] 90% (v1.0 + v1.1 complete; v1.2 Phase
 | 09-01 (v1.2) | 1 | ~3 min |
 | 09-02 (v1.2) | 1 | 3 min |
 | 10-01 (v1.2) | 1 | 2 min |
+| 10-02 (v1.2) | 1 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 2min, 2min, 3min, 2min, 3min
+- Last 5 plans: 2min, 3min, 2min, 3min, 3min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -58,6 +59,8 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [09-01]: uv pinned to 0.10.6 via COPY --from (never :latest); Task 1 required no .dockerignore changes; TOKENIZERS_PARALLELISM removed as dead env var
 - [09-02]: Delete all six dead lines from __init__.py (import os, import platform, and Darwin if-block) — leaving either import unused would fail F401 linting
 - [09-02]: Use uppercase RETRIEVAL_QUERY in retriever.py task_type kwarg — matches embedder.py default exactly to avoid runtime validation error
+- [Phase 10-02]: DEBT-03 confirmed live: gemini-embedding-001 accepts CODE_RETRIEVAL_QUERY task_type — asymmetric pairing at retriever.py line 734 is valid
+- [Phase 10-02]: DEBT-05 confirmed live: _stream_with_summary_filter() correctly suppresses SUMMARY tags — no leakage observed
 
 ### Pending Todos
 
@@ -65,10 +68,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 10]: DEBT-03 and DEBT-05 require live GCP credentials (ADC); must run with VERTEXAI_PROJECT set — cannot verify in offline/CI environment
+- [Phase 10 — RESOLVED]: DEBT-03 and DEBT-05 required live GCP credentials — both verified successfully via .env ADC on 2026-02-26
 
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 10-01-PLAN.md (DEBT-04 resolved; MODEL env var removed, answer_generator.py reads llm_client.DEFAULT_MODEL directly)
+Stopped at: Completed 10-02-PLAN.md (DEBT-03 and DEBT-05 resolved; live smoke tests added and verified against GCP)
 Resume file: None

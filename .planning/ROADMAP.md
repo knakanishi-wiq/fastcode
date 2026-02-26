@@ -37,7 +37,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 - [x] **Phase 8: Package System Foundation** — Create pyproject.toml, generate uv.lock, delete requirements.txt (2 plans) (completed 2026-02-26)
 - [x] **Phase 9: Dockerfile and Code Cleanup** — Update Dockerfile to use uv, remove dead code, make task_type explicit (completed 2026-02-26)
-- [ ] **Phase 10: Config Consolidation and Verification** — Consolidate MODEL/LITELLM_MODEL env vars; verify CODE_RETRIEVAL_QUERY and streaming behavior live
+- [x] **Phase 10: Config Consolidation and Verification** — Consolidate MODEL/LITELLM_MODEL env vars; verify CODE_RETRIEVAL_QUERY and streaming behavior live (completed 2026-02-26)
 
 ## Phase Details
 
@@ -98,4 +98,4 @@ Plans:
 | 7. Dependency Cleanup and Smoke Test | v1.1 | 2/2 | Complete | 2026-02-25 |
 | 8. Package System Foundation | 2/2 | Complete    | 2026-02-26 | - |
 | 9. Dockerfile and Code Cleanup | 2/2 | Complete    | 2026-02-26 | - |
-| 10. Config Consolidation and Verification | 1/2 | In Progress|  | - |
+| 10. Config Consolidation and Verification | 2/2 | Complete   | 2026-02-26 | - |
