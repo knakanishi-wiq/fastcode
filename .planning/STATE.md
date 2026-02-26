@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-26)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** Phase 8 — Package System Foundation (v1.2)
+**Current focus:** Phase 9 — Dockerfile and Code Cleanup (v1.2)
 
 ## Current Position
 
-Phase: 8 of 10 (v1.2 — Package System Foundation)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-02-26 — Phase 8 Plan 02 complete (requirements.txt deleted; Phase 8 fully done)
+Phase: 9 of 10 (v1.2 — Dockerfile and Code Cleanup)
+Plan: 1 of 3 in current phase
+Status: Plan 01 complete
+Last activity: 2026-02-26 — Phase 9 Plan 01 complete (Dockerfile rewritten with uv two-layer cache; PKG-05, PKG-06, PKG-07 satisfied)
 
-Progress: [█████████░] 80% (v1.0 + v1.1 complete; v1.2 Phase 8 complete)
+Progress: [█████████░] 83% (v1.0 + v1.1 complete; v1.2 Phase 8 complete; Phase 9 Plan 01 complete)
 
 ## Performance Metrics
 
@@ -50,6 +50,9 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [08-01]: Used [dependency-groups] dev (PEP 735) rather than [project.optional-dependencies] — stricter isolation, uv recommended approach
 - [08-01]: Did NOT add [tool.hatch.build.targets.wheel] — hatchling auto-discovered fastcode/ at repo root without it
 - [08-02]: Used git rm to delete requirements.txt atomically; all four Phase 8 success criteria passed on first attempt
+- [09-01]: uv pinned to 0.10.6 via COPY --from (never :latest); Task 1 required no .dockerignore changes; TOKENIZERS_PARALLELISM removed as dead env var
+- [Phase 09-dockerfile-and-code-cleanup]: Delete all six dead lines from __init__.py (import os, import platform, and Darwin if-block) — leaving either import unused would fail F401 linting
+- [Phase 09-dockerfile-and-code-cleanup]: Use uppercase RETRIEVAL_QUERY in retriever.py task_type kwarg — matches embedder.py default exactly to avoid runtime validation error
 
 ### Pending Todos
 
@@ -62,5 +65,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 08-02-PLAN.md (requirements.txt deleted; Phase 8 complete)
+Stopped at: Completed 09-01-PLAN.md (Dockerfile rewritten with uv two-layer cache; PKG-05/06/07 satisfied)
 Resume file: None
