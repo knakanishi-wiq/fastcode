@@ -93,5 +93,5 @@ Plans:
 | 6. Embedder Migration | v1.1 | 1/1 | Complete | 2026-02-25 |
 | 7. Dependency Cleanup and Smoke Test | v1.1 | 2/2 | Complete | 2026-02-25 |
 | 8. Package System Foundation | 2/2 | Complete    | 2026-02-26 | - |
-| 9. Dockerfile and Code Cleanup | 2/2 | Complete   | 2026-02-26 | - |
+| 9. Dockerfile and Code Cleanup | 2/2 | Complete    | 2026-02-26 | - |
 | 10. Config Consolidation and Verification | v1.2 | 0/? | Not started | - |
