@@ -1,465 +1,411 @@
-# Architecture Patterns
+# Architecture Research
 
-**Domain:** LiteLLM provider migration for Python code intelligence backend
-**Researched:** 2026-02-24
-**Confidence:** HIGH (based on direct codebase analysis + Nanobot reference implementation)
-
----
-
-## Current Architecture: What Exists Today
-
-FastCode currently has **5 files** that instantiate direct provider clients (the PROJECT.md says 4, but `repo_overview.py` and `repo_selector.py` were missed in that count):
-
-| File | Client Created | Call Method | Has Streaming |
-|------|---------------|-------------|---------------|
-| `fastcode/answer_generator.py` | `OpenAI()` or `Anthropic()` in `__init__` | `_generate_openai()`, `_generate_anthropic()` | Yes — `_generate_openai_stream()`, `_generate_anthropic_stream()` |
-| `fastcode/query_processor.py` | `OpenAI()` or `Anthropic()` in `__init__` | `_call_openai()`, `_call_anthropic()` | No |
-| `fastcode/iterative_agent.py` | `OpenAI()` or `Anthropic()` in `__init__` | `_call_llm()` (dispatches to openai/anthropic) | No |
-| `fastcode/repo_selector.py` | `OpenAI()` or `Anthropic()` in `__init__` | `_call_openai()`, `_call_anthropic()` | No |
-| `fastcode/repo_overview.py` | `OpenAI()` or `Anthropic()` in `__init__` | `openai_chat_completion()` only | No |
-
-Each file independently: reads `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `BASE_URL` / `MODEL` env vars, initializes its own provider client in `__init__`, and dispatches via `if self.provider == "openai": ... elif self.provider == "anthropic": ...` branches.
-
-`fastcode/llm_utils.py` is a thin utility that only handles the `max_tokens` / `max_completion_tokens` fallback for OpenAI-compatible APIs. It does not abstract the client itself.
-
-`fastcode/utils.py` uses `tiktoken` for token counting — this must be replaced or made provider-aware since VertexAI models don't use tiktoken encodings.
+**Domain:** Embedding backend migration — sentence-transformers to litellm.embedding() + VertexAI
+**Researched:** 2026-02-25
+**Confidence:** HIGH (codebase analysis + litellm official docs + VertexAI official docs)
 
 ---
 
-## Recommended Architecture: Centralized LiteLLM Client
+## Standard Architecture
 
-### Pattern: Single `LLMClient` Module
-
-Replace per-file client initialization with a single `fastcode/llm_client.py` module that wraps litellm. All five files import from it.
-
-**Why centralized over per-module:**
-- The five files already share the same `provider`, `model`, `BASE_URL`, env var reading pattern — they are doing the same initialization 5x
-- litellm configuration (drop_params, suppress_debug_info, VertexAI project/location) is global state that only needs to be set once
-- Centralized error handling, logging, and retry logic in one place instead of five
-- Nanobot's `LiteLLMProvider` class proves the pattern works; FastCode can use a simpler sync variant
-
-### Component Diagram
+### System Overview
 
 ```
-.env / config.yaml
+config/config.yaml (embedding: section)
        |
        v
-fastcode/llm_client.py          ← NEW: single LiteLLM wrapper
-  - configure_litellm()           (called once at startup by FastCode.__init__)
-  - completion(...)               (sync, non-streaming)
-  - completion_stream(...)        (sync streaming generator)
+fastcode/embedder.py  ←  REWRITE: CodeEmbedder
+  - embed_text(text, task_type)         ← task_type param added
+  - embed_batch(texts, task_type)       ← task_type param added
+  - embed_code_elements(elements)       ← calls embed_batch with RETRIEVAL_DOCUMENT
+  - embedding_dim: int                  ← hardcoded from config, not from model
        |
-       |---- imported by ----+
-       |                     |
-       v                     v
-answer_generator.py      query_processor.py
-iterative_agent.py       repo_selector.py
-repo_overview.py
+       |---------- called by ----------+
+       |                               |
+       v                               v
+fastcode/indexer.py              fastcode/retriever.py
+  embed_code_elements(elements)    embed_text(query)          ← RETRIEVAL_QUERY
+  embed_text(overview_text)        (in _semantic_search,
+  (RETRIEVAL_DOCUMENT both)         _select_relevant_repositories)
+       |                               |
+       v                               v
+fastcode/vector_store.py         fastcode/vector_store.py
+  initialize(embedding_dim)         search(query_vector)
+  add_vectors(vectors, metadata)
 ```
 
-### LiteLLM API Surface Used
+### Component Responsibilities
 
-litellm exposes `litellm.completion()` with an OpenAI-compatible signature. This replaces both the OpenAI and Anthropic call paths:
-
-```python
-# Non-streaming (replaces _call_openai, _call_anthropic, _generate_openai, _generate_anthropic)
-import litellm
-
-response = litellm.completion(
-    model="vertex_ai/gemini-2.0-flash-001",   # or "openai/gpt-4o", "anthropic/claude-opus-4-5"
-    messages=[{"role": "user", "content": prompt}],
-    temperature=0.4,
-    max_tokens=20000,
-)
-content = response.choices[0].message.content
-
-# Streaming (replaces _generate_openai_stream, _generate_anthropic_stream)
-response = litellm.completion(
-    model="vertex_ai/gemini-2.0-flash-001",
-    messages=[{"role": "user", "content": prompt}],
-    stream=True,
-)
-for chunk in response:
-    if chunk.choices and chunk.choices[0].delta.content:
-        yield chunk.choices[0].delta.content
-```
-
-The streaming chunk iteration pattern is **identical to the existing OpenAI streaming loop** in `answer_generator.py` lines 682-685. This is the lowest-friction migration path.
+| Component | Responsibility | Change Type |
+|-----------|----------------|-------------|
+| `fastcode/embedder.py` | All embedding calls; owns `embedding_dim` | REWRITE |
+| `fastcode/indexer.py` | Calls `embed_code_elements` (document) and `embed_text` (overview) | ADD `task_type` awareness |
+| `fastcode/retriever.py` | Calls `embed_text` (query) at 2 sites | ADD `task_type` awareness |
+| `fastcode/vector_store.py` | Receives `embedding_dim` from embedder; FAISS ops | NO CHANGE |
+| `fastcode/main.py` | Passes `self.embedder.embedding_dim` to `vector_store.initialize()` at 4 sites | NO CHANGE (dim source changes inside embedder) |
+| `config/config.yaml` | `embedding:` section fields | MODIFY — replace sentence-transformer fields |
+| `requirements.txt` | Remove sentence-transformers, torch | MODIFY |
 
 ---
 
-## Component Boundaries After Migration
+## Recommended Project Structure
 
-### `fastcode/llm_client.py` (NEW)
+No new files needed. This is a replacement rewrite of one module:
 
-**Responsibility:** Single point of litellm configuration and invocation for all FastCode LLM calls.
-
-**Contains:**
-- `configure_litellm(config: Dict[str, Any])` — called once during `FastCode.__init__()`. Sets global litellm options (`drop_params=True`, `suppress_debug_info=True`) and validates VertexAI env vars.
-- `completion(model, messages, temperature, max_tokens) -> str` — sync call, returns text content. Replaces all `_call_openai`, `_call_anthropic`, `_generate_openai`, `_generate_anthropic` methods.
-- `completion_stream(model, messages, temperature, max_tokens) -> Generator[str, None, None]` — sync streaming generator. Replaces `_generate_openai_stream`, `_generate_anthropic_stream`.
-- A module-level `_model` variable populated from `os.getenv("MODEL")` on import, so callers don't need to pass model explicitly.
-
-**Does NOT contain:**
-- Prompt building (stays in each component)
-- Response parsing (stays in each component)
-- Token counting (stays in `utils.py`, but `count_tokens` needs a provider-agnostic fallback)
-
-**Communicates with:** All 5 LLM call-site files (answer_generator, query_processor, iterative_agent, repo_selector, repo_overview)
-
-### `fastcode/answer_generator.py` (MODIFIED)
-
-**Changes:**
-- Remove `from openai import OpenAI`, `from anthropic import Anthropic`
-- Remove `_initialize_client()`, `self.client`, `self.api_key`, `self.anthropic_api_key`, `self.base_url`
-- Remove `_generate_openai()`, `_generate_anthropic()`, `_generate_openai_stream()`, `_generate_anthropic_stream()`
-- Remove `if self.provider == "openai": ... elif self.provider == "anthropic":` dispatch in `generate()` and `generate_stream()`
-- Add `from .llm_client import completion, completion_stream`
-- Replace the four `_generate_*` private methods with two calls to `llm_client.completion()` and `llm_client.completion_stream()`
-- Keep `_stream_with_summary_filter()` — it wraps any generator, provider-agnostic
-- Keep streaming protocol: the `yield (chunk, None)` / `yield (None, metadata)` contract is unchanged
-
-### `fastcode/query_processor.py` (MODIFIED)
-
-**Changes:**
-- Remove `OpenAI`, `Anthropic` imports and `_initialize_llm_client()`
-- Remove `self.llm_client`, `self.api_key`, `self.anthropic_api_key`, `self.base_url`
-- Remove `_call_openai()`, `_call_anthropic()`
-- Replace with single `from .llm_client import completion` and use `completion(...)` directly in `_enhance_with_llm()` and `_resolve_references_and_rewrite()`
-
-### `fastcode/iterative_agent.py` (MODIFIED)
-
-**Changes:**
-- Remove `OpenAI`, `Anthropic` imports, `_initialize_client()`, `self.client`
-- Remove `if self.provider == "openai": ... elif self.provider == "anthropic":` in `_call_llm()`
-- Replace `_call_llm()` body with `from .llm_client import completion`
-
-### `fastcode/repo_selector.py` (MODIFIED)
-
-**Changes:** Same pattern as query_processor — remove client init, replace `_call_openai`/`_call_anthropic` with `llm_client.completion()`.
-
-### `fastcode/repo_overview.py` (MODIFIED)
-
-**Changes:** Same pattern as repo_selector. Also uses `openai_chat_completion` — can be removed once litellm replaces the OpenAI client.
-
-### `fastcode/llm_utils.py` (DELETED or KEPT EMPTY)
-
-The current `openai_chat_completion()` wrapper exists solely to handle the `max_tokens` vs `max_completion_tokens` fallback for OpenAI models. litellm handles this internally via `drop_params=True`. This file can be deleted. Any imports of `openai_chat_completion` in the 5 files are removed as part of the migration.
-
-### `fastcode/utils.py` — `count_tokens()` (MODIFIED)
-
-`count_tokens()` uses `tiktoken.encoding_for_model(model)` which fails silently for non-OpenAI model names (e.g. `vertex_ai/gemini-2.0-flash-001`). litellm provides `litellm.token_counter()` which is provider-aware. Replace the tiktoken calls:
-
-```python
-# Before
-import tiktoken
-encoding = tiktoken.encoding_for_model(model)
-return len(encoding.encode(text))
-
-# After
-import litellm
-return litellm.token_counter(model=model, text=text)
+```
+fastcode/
+├── embedder.py          # REWRITE — CodeEmbedder backed by litellm.embedding()
+├── indexer.py           # TOUCH — pass task_type="RETRIEVAL_DOCUMENT" to embed calls
+├── retriever.py         # TOUCH — pass task_type="RETRIEVAL_QUERY" to embed_text calls
+├── vector_store.py      # NO CHANGE — dimension-agnostic
+├── main.py              # NO CHANGE — reads self.embedder.embedding_dim as before
+└── llm_client.py        # NO CHANGE — LLM calls only, not embedding
+config/
+└── config.yaml          # MODIFY embedding: section
+tests/
+└── test_embedding_smoke.py   # NEW — ADC smoke test parallel to existing LLM smoke test
 ```
 
-litellm falls back to `cl100k_base` for unknown models, same behavior as current code. For VertexAI models it uses the correct tokenizer.
+### Structure Rationale
+
+- **No new module for embedding client:** litellm.embedding() is a top-level function, same as litellm.completion(). The existing CodeEmbedder class boundary is preserved — callers (indexer, retriever, main) see no interface change.
+- **No embedding_client.py:** Unlike the LLM migration which centralized 5 disparate call sites, embedding has exactly one call site (CodeEmbedder). A separate module would add indirection with no benefit.
 
 ---
 
-## Data Flow After Migration
+## Architectural Patterns
 
-### Initialization Flow
+### Pattern 1: Static `embedding_dim` from Config (replaces `get_sentence_embedding_dimension()`)
 
-```
-FastCode.__init__(config)
-  → llm_client.configure_litellm(config)
-      → reads MODEL, VERTEX_PROJECT, VERTEX_LOCATION from env
-      → sets litellm.drop_params = True
-      → sets litellm.suppress_debug_info = True
-      → validates required env vars, logs warnings
-  → AnswerGenerator.__init__(config)   [no longer init's own client]
-  → QueryProcessor.__init__(config)    [no longer init's own client]
-  → IterativeAgent.__init__(...)       [no longer init's own client]
-  → RepositorySelector.__init__(...)   [no longer init's own client]
-  → RepositoryOverviewGenerator(...)   [no longer init's own client]
-```
+**What:** The new CodeEmbedder reads `embedding_dim` from `config["embedding"]["dimension"]` instead of querying it from the model object. The value is set in config.yaml.
 
-### Query Flow (non-streaming)
+**When to use:** Always, for any API-backed embedding model where dimension is determined by the API call's `output_dimensionality` parameter rather than the model's intrinsic shape.
 
-```
-user query
-  → QueryProcessor.process()
-      → llm_client.completion(model, messages)   [query rewriting/enhancement]
-  → HybridRetriever.retrieve()
-      → IterativeAgent (if enabled)
-          → llm_client.completion(model, messages)   [confidence scoring + tool decisions]
-  → AnswerGenerator.generate()
-      → llm_client.completion(model, messages)   [answer generation]
-  → Dict[str, Any] response
-```
+**Why:** sentence-transformers returned dimension via `model.get_sentence_embedding_dimension()` because the local model object knows its own shape. litellm.embedding() makes a network call — there is no model object to query. Dimension is known from the model's documentation (gemini-embedding-001 default: 3072; with `output_dimensionality=768`: 768).
 
-### Query Flow (streaming)
-
-```
-user query
-  → [same as above through retrieval]
-  → AnswerGenerator.generate_stream()
-      → yield (None, metadata)
-      → for chunk in llm_client.completion_stream(model, messages):
-          → [_stream_with_summary_filter passes through unchanged]
-          → yield (chunk, None)
-      → yield (None, {"complete": True, ...})
-```
-
-### VertexAI Auth Flow
-
-```
-Docker container starts
-  → ADC credentials available via:
-      a) Mounted ~/.config/gcloud/application_default_credentials.json (local dev)
-      b) GCP Workload Identity / service account (production)
-  → litellm reads VERTEX_PROJECT_ID + VERTEX_LOCATION from env
-  → litellm uses google-auth library with ADC automatically when model = "vertex_ai/..."
-  → No API key required
-```
-
----
-
-## Patterns to Follow
-
-### Pattern 1: Module-Level Configuration, Not Per-Instance
-
-**What:** Configure litellm once at module level or startup. Do not pass a client object to every component.
-
-**When:** litellm is designed as a module with global configuration. Per-class clients like the current OpenAI/Anthropic pattern do not apply.
+**Trade-offs:**
+- Pro: No "probe embedding" call required at startup (avoids extra API round-trip)
+- Pro: Dimension is explicit in config, visible at a glance
+- Con: Config and actual output must be kept in sync; misconfiguration causes silent dimension mismatch at FAISS initialization
 
 **Example:**
 ```python
-# fastcode/llm_client.py
+# config/config.yaml
+embedding:
+  model: "vertex_ai/gemini-embedding-001"
+  dimension: 768              # must match output_dimensionality below
+  output_dimensionality: 768  # passed to litellm.embedding()
 
-import os
-import litellm
-
-litellm.drop_params = True
-litellm.suppress_debug_info = True
-
-_model: str = ""
-
-def configure_litellm(config: dict) -> None:
-    """Call once during FastCode.__init__(). Sets model and validates env."""
-    global _model
-    _model = os.getenv("MODEL", "")
-    if not _model:
-        raise ValueError("MODEL env var is required")
-    # VertexAI: these env vars are read by litellm automatically
-    # VERTEX_PROJECT, VERTEXAI_LOCATION (or VERTEX_LOCATION)
-    if _model.startswith("vertex_ai/"):
-        project = os.getenv("VERTEX_PROJECT") or os.getenv("VERTEXAI_PROJECT")
-        if not project:
-            import logging
-            logging.getLogger(__name__).warning(
-                "VERTEX_PROJECT not set; VertexAI calls will fail"
-            )
-
-def completion(messages: list, temperature: float, max_tokens: int) -> str:
-    response = litellm.completion(
-        model=_model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return response.choices[0].message.content
-
-def completion_stream(messages: list, temperature: float, max_tokens: int):
-    response = litellm.completion(
-        model=_model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-    )
-    for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+# fastcode/embedder.py
+class CodeEmbedder:
+    def __init__(self, config):
+        self.embedding_config = config.get("embedding", {})
+        self.model_name = self.embedding_config.get("model", "vertex_ai/gemini-embedding-001")
+        self.output_dimensionality = self.embedding_config.get("output_dimensionality", 768)
+        # Static from config — no API call at init time
+        self.embedding_dim = self.embedding_config.get("dimension", 768)
 ```
 
-### Pattern 2: Model Name as Full Provider-Prefixed String
+### Pattern 2: `task_type` as Parameter on `embed_text` and `embed_batch`
 
-**What:** Store model name as the fully-qualified litellm identifier. Never split provider and model into separate config fields.
+**What:** Add `task_type: str = "RETRIEVAL_DOCUMENT"` parameter to `embed_text()` and `embed_batch()`. Indexing callers pass `RETRIEVAL_DOCUMENT`; query callers pass `RETRIEVAL_QUERY`.
 
-**When:** Always. litellm routes on the model string prefix.
+**When to use:** When the embedding model uses task-differentiated representations (gemini-embedding-001's `RETRIEVAL_DOCUMENT` vs `RETRIEVAL_QUERY` produce meaningfully different vectors optimized for each role).
+
+**Trade-offs:**
+- Pro: Correct semantic alignment — documents and queries are encoded for their respective roles
+- Pro: Interface is explicit and self-documenting at the call site
+- Con: One additional parameter to thread through the call chain
+- Con: If `task_type` is accidentally omitted, the default falls back to `RETRIEVAL_DOCUMENT`; callers must be explicit
 
 **Example:**
-```
-# .env
-MODEL=vertex_ai/gemini-2.0-flash-001       # VertexAI
-MODEL=anthropic/claude-opus-4-5            # Anthropic direct
-MODEL=openai/gpt-4o                        # OpenAI direct
-MODEL=openai/gpt-4o                        # OpenRouter (with BASE_URL set)
-```
+```python
+# fastcode/embedder.py
+def embed_text(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
+    return self.embed_batch([text], task_type=task_type)[0]
 
-The `provider` field in `config.yaml` (`generation.provider: "openai"`) becomes irrelevant — remove it after migration. Provider is encoded in the model name.
+def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
+    # litellm.embedding() accepts task_type as a Vertex-specific kwarg
+    response = litellm.embedding(
+        model=self.model_name,
+        input=texts,
+        task_type=task_type,
+        dimensions=self.output_dimensionality,
+    )
+    vectors = np.array([item["embedding"] for item in response.data], dtype=np.float32)
+    return vectors
 
-### Pattern 3: Keep Streaming Contract Unchanged
+# fastcode/retriever.py — query embedding
+query_embedding = self.embedder.embed_text(query, task_type="RETRIEVAL_QUERY")
 
-**What:** `generate_stream()` in `answer_generator.py` yields `(chunk, None)` and `(None, metadata)` tuples. This protocol is consumed by `web_app.py` and `api.py` streaming endpoints. Do not change it.
-
-**When:** The streaming generator internals change (litellm instead of openai/anthropic), but the yield protocol stays identical.
-
-**Why this works:** litellm streaming chunks have the same structure as OpenAI streaming chunks (`chunk.choices[0].delta.content`). The replacement is drop-in at the chunk iteration level.
-
-### Pattern 4: Token Counter Replacement
-
-**What:** Replace `tiktoken` with `litellm.token_counter()` in `utils.py`.
-
-**When:** Model names like `vertex_ai/gemini-2.0-flash-001` cause tiktoken to fall back to `cl100k_base` silently — accurate enough for truncation decisions, but misleading for logging. litellm's token counter is model-aware.
-
-**Caveat (MEDIUM confidence):** litellm's token counter accuracy for VertexAI/Gemini models depends on the google-cloud-aiplatform library version. If it returns 0 or raises, fall back to `cl100k_base` like the current code does. Keep the try/except wrapper.
-
----
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Per-Component litellm Import Without Central Configure
-
-**What:** Each file imports litellm directly and calls `litellm.completion()` without any shared initialization.
-
-**Why bad:** VertexAI project/location env vars need to be set and validated before the first call. Global litellm settings (`drop_params`, `suppress_debug_info`) would need to be repeated in every file. Error handling diverges.
-
-**Instead:** Route all calls through `fastcode/llm_client.py`. The five call-site files import `from .llm_client import completion, completion_stream` only.
-
-### Anti-Pattern 2: Preserving the `provider` Dispatch Pattern
-
-**What:** Keeping `if self.provider == "openai": ... elif self.provider == "anthropic":` and replacing the OpenAI/Anthropic clients with `litellm.completion()` inside each branch.
-
-**Why bad:** Defeats the purpose of litellm — you'd be calling litellm with a hardcoded provider prefix instead of letting the model string drive routing. Also leaves all the duplicated init code in place.
-
-**Instead:** Delete all provider dispatch. Single `litellm.completion(model=_model, ...)` handles everything.
-
-### Anti-Pattern 3: Wrapping Nanobot's `LiteLLMProvider` for FastCode Use
-
-**What:** Re-using the async `LiteLLMProvider` from `nanobot/nanobot/providers/litellm_provider.py` in FastCode.
-
-**Why bad:** Nanobot's provider is async (uses `acompletion`). FastCode's pipeline is synchronous — `generate()`, `generate_stream()`, `_call_llm()` are all sync. Using `asyncio.run()` to bridge would add latency and break streaming inside FastAPI's `StreamingResponse` context.
-
-**Instead:** FastCode uses `litellm.completion()` (sync) directly. Nanobot continues using `litellm.acompletion()` (async). They are separate usage patterns of the same library.
-
-### Anti-Pattern 4: Removing tiktoken Before Verifying Fallback
-
-**What:** Deleting tiktoken from requirements.txt immediately.
-
-**Why bad:** `count_tokens()` in `utils.py` is called during prompt truncation before every LLM call. If litellm's token counter fails for any reason, there's no fallback, and truncation silently breaks.
-
-**Instead:** Migrate `count_tokens()` to use `litellm.token_counter()` with a `try/except` that falls back to `tiktoken.get_encoding("cl100k_base")`. Keep tiktoken in requirements.txt until the litellm path is verified in production.
-
----
-
-## Build Order (Implementation Phases)
-
-The dependency structure dictates this order:
-
-**Step 1 — Create `fastcode/llm_client.py`**
-No existing code changes. Pure addition. Can be tested in isolation.
-
-**Step 2 — Migrate `fastcode/utils.py` `count_tokens()`**
-Token counting is used by `answer_generator.py` before LLM calls. Fix this before migrating the generators or truncation logic breaks with VertexAI model names.
-
-**Step 3 — Migrate `fastcode/llm_utils.py` → deprecate**
-Remove `openai_chat_completion` dependency from all 5 files. This import is in answer_generator, query_processor, iterative_agent, repo_selector, repo_overview.
-
-**Step 4 — Migrate non-streaming callers first** (lower risk)
-Order: `repo_overview.py` → `repo_selector.py` → `query_processor.py` → `iterative_agent.py`
-These are all non-streaming, single-call patterns. Each is an isolated change: remove init, replace `_call_openai`/`_call_anthropic` with `llm_client.completion()`.
-
-**Step 5 — Migrate `answer_generator.py`** (highest risk, last)
-This file has both streaming and non-streaming paths, plus the `_stream_with_summary_filter()` buffering logic. Migrate non-streaming `generate()` first, then `generate_stream()`. The `_stream_with_summary_filter()` method is provider-agnostic and requires no changes.
-
-**Step 6 — Update `requirements.txt` and `.env`**
-Add `litellm`, add `google-cloud-aiplatform` (required for VertexAI). Remove `openai` and `anthropic` (or keep as optional). Add VertexAI env var documentation.
-
-**Step 7 — Update `config/config.yaml`**
-Remove `generation.provider` field (now encoded in MODEL env var). Add comments showing model name format examples.
-
----
-
-## Integration Points Between litellm and Existing Components
-
-| Integration Point | Current | After Migration |
-|------------------|---------|----------------|
-| Client init at startup | `OpenAI(api_key=...)` in each `__init__` | `llm_client.configure_litellm(config)` in `FastCode.__init__()` |
-| Non-streaming call | `client.chat.completions.create(...)` or `client.messages.create(...)` | `litellm.completion(model=_model, ...)` |
-| Streaming call | `client.chat.completions.create(stream=True)` | `litellm.completion(model=_model, stream=True)` |
-| Chunk iteration | `chunk.choices[0].delta.content` | Identical — `chunk.choices[0].delta.content` |
-| VertexAI auth | N/A (not supported) | ADC via google-auth, zero code required |
-| Token counting | `tiktoken.encoding_for_model(model)` | `litellm.token_counter(model=model, text=text)` |
-| Model routing | `generation.provider` in config.yaml | Model name prefix (`vertex_ai/`, `openai/`, `anthropic/`) |
-| OpenRouter/Ollama | `BASE_URL` env var → `OpenAI(base_url=...)` | litellm handles OpenAI-compatible endpoints via `openai/` prefix + `api_base` |
-
----
-
-## VertexAI Environment Variables
-
-Based on litellm documentation patterns and the Nanobot provider's `_setup_env()` for gateway routing:
-
-```bash
-# Required for VertexAI
-MODEL=vertex_ai/gemini-2.0-flash-001   # or any vertex_ai/* model
-VERTEX_PROJECT=my-gcp-project-id        # GCP project ID
-VERTEXAI_LOCATION=us-central1           # or VERTEX_LOCATION
-
-# Auth: no API key needed — use ADC
-# Local: gcloud auth application-default login
-# GCP: service account or workload identity provides ADC automatically
-
-# Optional: keep existing providers working
-# OPENAI_API_KEY=...
-# ANTHROPIC_API_KEY=...
-# BASE_URL=...   (for OpenRouter/Ollama)
+# fastcode/indexer.py — document embedding (index time)
+embedding = self.embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")
+elements_with_embeddings = self.embedder.embed_code_elements(element_dicts)  # internally uses RETRIEVAL_DOCUMENT
 ```
 
-litellm reads `VERTEX_PROJECT` and `VERTEXAI_LOCATION` (or `VERTEX_LOCATION`) as env vars automatically when the model is prefixed with `vertex_ai/`. No additional configuration code is needed beyond setting these env vars.
+### Pattern 3: One-Input-Per-Request Batching for gemini-embedding-001
 
-**Confidence note:** The exact env var names (`VERTEX_PROJECT` vs `VERTEXAI_PROJECT`) should be verified against the litellm docs before implementation. litellm has had minor naming inconsistencies across versions.
+**What:** gemini-embedding-001 accepts only a single input text per API request (confirmed by official Vertex AI docs). Batch embedding requires looping N requests.
+
+**When to use:** Always for gemini-embedding-001. Other Vertex AI embedding models (text-embedding-004) accept up to 250 inputs.
+
+**Trade-offs:**
+- Con: Significant throughput reduction at index time — N documents = N API calls instead of ceil(N/250) calls
+- Pro: Simple implementation, no chunking logic needed
+- Mitigation: Indexing is a one-time offline operation; latency matters less than correctness
+
+**Example:**
+```python
+def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
+    if not texts:
+        return np.array([])
+    embeddings = []
+    for text in texts:
+        response = litellm.embedding(
+            model=self.model_name,
+            input=[text],          # single item — gemini-embedding-001 limit
+            task_type=task_type,
+            dimensions=self.output_dimensionality,
+        )
+        embeddings.append(response.data[0]["embedding"])
+    return np.array(embeddings, dtype=np.float32)
+```
+
+**Alternative:** If litellm's Python SDK performs SDK-level batching transparently (unconfirmed), pass all texts at once and verify behavior. Fall back to the loop if a batch returns errors.
+
+### Pattern 4: Response Vector Extraction
+
+**What:** litellm.embedding() returns an OpenAI-compatible response object. The embedding vector lives at `response.data[0]["embedding"]` (a Python list of floats).
+
+**Example:**
+```python
+response = litellm.embedding(
+    model="vertex_ai/gemini-embedding-001",
+    input=["some text"],
+    task_type="RETRIEVAL_DOCUMENT",
+    dimensions=768,
+)
+# Response structure:
+# response.data = [{"object": "embedding", "index": 0, "embedding": [float, ...]}]
+vector = np.array(response.data[0]["embedding"], dtype=np.float32)
+```
 
 ---
 
-## Scalability Considerations
+## Data Flow
 
-| Concern | Current | With LiteLLM |
-|---------|---------|-------------|
-| Provider switching | Code change + redeploy | Change `MODEL` env var + restart |
-| Adding new provider | New client class, new dispatch branch in 5 files | Change model name prefix only |
-| Retry/fallback | None | litellm has built-in retry + fallback to backup models via `fallbacks=[...]` |
-| Rate limiting | Handled per-provider | litellm has provider-aware rate limit handling |
-| Token counting accuracy | tiktoken (OpenAI-only) | litellm model-aware, falls back gracefully |
+### Index-Time Embedding Flow
+
+```
+CodeIndexer.index_repository()
+  → embedder.embed_code_elements(element_dicts)
+      → embed_batch(texts, task_type="RETRIEVAL_DOCUMENT")
+          → for each text:
+              litellm.embedding(model, input=[text], task_type="RETRIEVAL_DOCUMENT", dimensions=768)
+          → np.array([vectors])   shape: (N, 768)
+  → elements[i].metadata["embedding"] = vector
+
+CodeIndexer._save_repository_overview()
+  → embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")
+      → embed_batch([overview_text], task_type="RETRIEVAL_DOCUMENT")
+          → litellm.embedding(model, input=[overview_text], task_type="RETRIEVAL_DOCUMENT", dimensions=768)
+      → vector   shape: (768,)
+  → vector_store.save_repo_overview(embedding=vector)
+```
+
+### Query-Time Embedding Flow
+
+```
+HybridRetriever._semantic_search(query)
+  → embedder.embed_text(query, task_type="RETRIEVAL_QUERY")
+      → litellm.embedding(model, input=[query], task_type="RETRIEVAL_QUERY", dimensions=768)
+      → vector   shape: (768,)
+  → vector_store.search(query_vector=vector)
+
+HybridRetriever._select_relevant_repositories(query)
+  → embedder.embed_text(query, task_type="RETRIEVAL_QUERY")   ← same pattern
+  → vector_store.search_repository_overviews(query_embedding=vector)
+```
+
+### FAISS Initialization Flow
+
+```
+main.py: FastCode.__init__()
+  → self.embedder = CodeEmbedder(config)
+      → self.embedding_dim = config["embedding"]["dimension"]   # 768, from config.yaml
+      [NO API call at init time]
+  → self.vector_store = VectorStore(config)
+
+main.py: FastCode._index_repository()
+  → if self.vector_store.dimension is None:
+        self.vector_store.initialize(self.embedder.embedding_dim)   # initialize(768)
+        [FAISS IndexHNSWFlat(768, m, METRIC_INNER_PRODUCT)]
+
+retriever.py: HybridRetriever.reload_specific_repositories()
+  → if self.filtered_vector_store is None:
+        self.filtered_vector_store = VectorStore(config)
+        self.filtered_vector_store.initialize(self.embedder.embedding_dim)  # initialize(768)
+```
 
 ---
 
-## Files Requiring Changes (Summary)
+## Integration Points
 
-| File | Change Type | Risk |
-|------|------------|------|
-| `fastcode/llm_client.py` | CREATE | Low — new file |
-| `fastcode/utils.py` | MODIFY — `count_tokens()`, `truncate_to_tokens()` | Low — isolated utility |
-| `fastcode/llm_utils.py` | DELETE | Low — import removed from all callers first |
-| `fastcode/repo_overview.py` | MODIFY — remove client init, replace calls | Low — no streaming |
-| `fastcode/repo_selector.py` | MODIFY — remove client init, replace calls | Low — no streaming |
-| `fastcode/query_processor.py` | MODIFY — remove client init, replace calls | Low — no streaming |
-| `fastcode/iterative_agent.py` | MODIFY — remove client init, replace `_call_llm()` | Medium — large file, many LLM calls |
-| `fastcode/answer_generator.py` | MODIFY — remove client init, replace 4 generate methods | High — streaming + non-streaming |
-| `requirements.txt` | MODIFY — add litellm, google-cloud-aiplatform | Low |
-| `config/config.yaml` | MODIFY — remove provider field, add model format docs | Low |
-| `.env` / `.env.example` | MODIFY — add VERTEX_PROJECT, VERTEXAI_LOCATION | Low |
+### External Services
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| VertexAI gemini-embedding-001 | `litellm.embedding(model="vertex_ai/gemini-embedding-001", ...)` | ADC auth; VERTEXAI_PROJECT + VERTEXAI_LOCATION env vars required (same as LLM calls) |
+| FAISS | `VectorStore.initialize(dim)` — no change | Receives 768 instead of 384; existing index files must be deleted on first v1.1 run |
+
+### Internal Boundaries
+
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| `embedder.py` → litellm | `litellm.embedding()` direct call | No wrapper module needed — single call site |
+| `indexer.py` → `embedder.py` | `embed_code_elements(elements)` — no signature change | Internally calls `embed_batch(..., task_type="RETRIEVAL_DOCUMENT")` |
+| `indexer.py` → `embedder.py` | `embed_text(text, task_type="RETRIEVAL_DOCUMENT")` — new param at call site | indexer explicitly passes task_type |
+| `retriever.py` → `embedder.py` | `embed_text(text, task_type="RETRIEVAL_QUERY")` — new param at call site | retriever explicitly passes task_type |
+| `main.py` → `embedder.py` | `self.embedder.embedding_dim` — no change | Source of truth changes (config not model.get_sentence_embedding_dimension()); callers unchanged |
+| `vector_store.py` | `initialize(dimension)` — no change | Dimension value changes from 384 to 768; API unchanged |
+
+---
+
+## Config Changes
+
+### config.yaml — `embedding:` section
+
+```yaml
+# BEFORE (sentence-transformers)
+embedding:
+  model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  device: "auto"
+  batch_size: 32
+  max_seq_length: 512
+  normalize_embeddings: true
+
+# AFTER (litellm + VertexAI)
+embedding:
+  model: "vertex_ai/gemini-embedding-001"
+  dimension: 768               # must match output_dimensionality
+  output_dimensionality: 768   # 768 | 1536 | 3072 (default 3072 if omitted)
+  # device, batch_size, max_seq_length, normalize_embeddings — REMOVE (not applicable)
+```
+
+**Why 768 not 3072:** The PROJECT.md constraint states "FAISS index reindex required: embedding dimension changes (384 → 768)". 768 balances quality vs storage. Google's normalization note: 3072-dim embeddings are pre-normalized; 768-dim embeddings must be normalized manually (FAISS `normalize_L2` handles this already in `vector_store.add_vectors`).
+
+---
+
+## Files: New vs Modified vs Unchanged
+
+| File | Status | What Changes |
+|------|--------|--------------|
+| `fastcode/embedder.py` | REWRITE | Remove SentenceTransformer; replace with litellm.embedding(); add task_type param; change embedding_dim source |
+| `fastcode/indexer.py` | MODIFY (minimal) | Add `task_type="RETRIEVAL_DOCUMENT"` to `embed_text()` call at line 369 |
+| `fastcode/retriever.py` | MODIFY (minimal) | Add `task_type="RETRIEVAL_QUERY"` to `embed_text()` calls at lines 415 and 734 |
+| `fastcode/vector_store.py` | NO CHANGE | Dimension-agnostic |
+| `fastcode/main.py` | NO CHANGE | Reads `self.embedder.embedding_dim` — source changes internally |
+| `fastcode/llm_client.py` | NO CHANGE | LLM calls only |
+| `config/config.yaml` | MODIFY | Replace embedding: section fields |
+| `requirements.txt` | MODIFY | Remove sentence-transformers, torch; litellm already present |
+| `tests/test_embedding_smoke.py` | CREATE | ADC smoke test for embedding |
+
+---
+
+## Build Order
+
+Dependencies dictate this order:
+
+**Step 1 — Rewrite `fastcode/embedder.py`**
+Pure replacement. No callers change until Step 2 and 3. Can be tested in isolation by constructing CodeEmbedder directly.
+
+**Step 2 — Touch `fastcode/indexer.py`** (2 sites)
+Add `task_type="RETRIEVAL_DOCUMENT"` at:
+- Line 369: `self.embedder.embed_text(overview_text)` → `self.embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")`
+- `embed_code_elements` requires no change — task_type is baked inside the method
+
+**Step 3 — Touch `fastcode/retriever.py`** (2 sites)
+Add `task_type="RETRIEVAL_QUERY"` at:
+- Line 415: `self.embedder.embed_text(semantic_query_text)` → `self.embedder.embed_text(semantic_query_text, task_type="RETRIEVAL_QUERY")`
+- Line 734: `self.embedder.embed_text(query)` → `self.embedder.embed_text(query, task_type="RETRIEVAL_QUERY")`
+
+**Step 4 — Update `config/config.yaml`**
+Replace the `embedding:` section. Remove `device`, `batch_size`, `max_seq_length`, `normalize_embeddings`. Add `dimension` and `output_dimensionality`.
+
+**Step 5 — Update `requirements.txt`**
+Remove `sentence-transformers`, `torch`. Confirm `litellm` is present (already used for LLM calls).
+
+**Step 6 — Write `tests/test_embedding_smoke.py`**
+Call `embedder.embed_text("hello world", task_type="RETRIEVAL_QUERY")` via ADC. Assert vector shape is `(768,)`. Skip if `VERTEXAI_PROJECT` not set (same pattern as LLM smoke test).
+
+**Step 7 — Delete existing FAISS indexes**
+Dimension change (384 → 768) makes old indexes incompatible. Document this in migration notes: clear `./data/vector_store/*.faiss` and `*.pkl` before first run.
+
+---
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Probing Dimension via a Real API Call at Init
+
+**What people do:** Call `litellm.embedding()` with a test string during `CodeEmbedder.__init__()`, then read `len(response.data[0]["embedding"])` to set `self.embedding_dim`.
+
+**Why it's wrong:** Adds a real API round-trip (and cost) every time the application starts, including during tests and CI. Also fails fast if credentials are missing at startup rather than at actual use time.
+
+**Do this instead:** Read `dimension` from `config["embedding"]["dimension"]`. Hardcode the known value in config.yaml. Verify alignment in the smoke test.
+
+### Anti-Pattern 2: Using Default task_type (No Parameter)
+
+**What people do:** Call `litellm.embedding(model=..., input=[text])` without `task_type`, relying on the default.
+
+**Why it's wrong:** The VertexAI default for `task_type` is `RETRIEVAL_QUERY`. Documents indexed without `RETRIEVAL_DOCUMENT` are semantically misaligned — the model encodes them as if they were queries. Similarity scores between documents and queries will be lower quality.
+
+**Do this instead:** Always pass `task_type` explicitly. Use `"RETRIEVAL_DOCUMENT"` for all indexing calls; use `"RETRIEVAL_QUERY"` for all query embedding calls.
+
+### Anti-Pattern 3: Keeping `embed_code_elements` as the Only Task-Type Entry Point
+
+**What people do:** Only add `task_type` to `embed_code_elements()` (which handles bulk indexing) but not to `embed_text()` (which handles overview indexing in `indexer.py` and all query embeddings in `retriever.py`).
+
+**Why it's wrong:** `indexer._save_repository_overview()` calls `embed_text()` directly, not `embed_code_elements()`. `retriever.py` also calls `embed_text()` directly. All three paths need task_type.
+
+**Do this instead:** Add `task_type` parameter to both `embed_text()` and `embed_batch()`. `embed_code_elements()` passes `RETRIEVAL_DOCUMENT` to `embed_batch()` internally.
+
+### Anti-Pattern 4: Passing a Batch to litellm for gemini-embedding-001
+
+**What people do:** Call `litellm.embedding(model=..., input=texts)` with a list of N texts, expecting batch processing.
+
+**Why it's wrong:** gemini-embedding-001 accepts only a single input per request at the REST API level. Passing multiple inputs may silently fail or return incorrect results depending on the litellm version.
+
+**Do this instead:** Loop over texts and call `litellm.embedding()` one input at a time. If batch behavior is needed, validate against the litellm version in use and check the actual response `len(response.data)` matches `len(input)`.
+
+---
+
+## Scaling Considerations
+
+| Scale | Architecture Adjustments |
+|-------|--------------------------|
+| Single repo (hundreds of elements) | Loop-per-element works fine; indexing is ~minutes |
+| Multi-repo (thousands of elements) | Consider batching with `asyncio`/`litellm.aembedding()` at index time; not needed for v1.1 |
+| Live query path | Single `embed_text()` call per query — latency is ~100-200ms VertexAI API round-trip; acceptable |
+
+### Scaling Priorities
+
+1. **First bottleneck:** Index-time API throughput — 1 call per element is slow for large repos. Mitigation for v1.1: not in scope; reindexing is offline. Future: `aembedding()` concurrency.
+2. **Second bottleneck:** Query embedding adds ~100-200ms latency per query round-trip. Mitigation: cache query embeddings (cache already exists in codebase).
 
 ---
 
 ## Sources
 
-- Direct codebase analysis: `fastcode/answer_generator.py`, `fastcode/query_processor.py`, `fastcode/iterative_agent.py`, `fastcode/repo_selector.py`, `fastcode/repo_overview.py`, `fastcode/llm_utils.py`, `fastcode/utils.py` (HIGH confidence)
-- Reference implementation: `nanobot/nanobot/providers/litellm_provider.py` (HIGH confidence — same codebase)
-- litellm streaming chunk format: same as OpenAI SDK format, verified by inspection of existing streaming code in `answer_generator.py` lines 682-685 (HIGH confidence)
-- VertexAI env var names: inferred from litellm docs patterns and community usage; verify exact names before implementation (MEDIUM confidence)
-- `litellm.token_counter()` fallback behavior for unknown models: inferred from litellm's documented fallback to cl100k_base; verify accuracy for Gemini models (MEDIUM confidence)
+- Direct codebase analysis: `fastcode/embedder.py`, `fastcode/indexer.py`, `fastcode/retriever.py`, `fastcode/vector_store.py`, `fastcode/main.py`, `config/config.yaml` (HIGH confidence)
+- litellm embedding API: https://docs.litellm.ai/docs/embedding/supported_embedding (HIGH confidence — official docs, current)
+- litellm VertexAI embedding: https://docs.litellm.ai/docs/providers/vertex_embedding (HIGH confidence — official docs)
+- litellm task_type support for Vertex: https://docs.litellm.ai/docs/providers/vertex — `task_type` listed as Vertex-specific param (HIGH confidence)
+- gemini-embedding-001 output dimensions: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api — 3072 default, 768/1536/3072 supported via `output_dimensionality` (HIGH confidence — official docs)
+- gemini-embedding-001 single-input-per-request limit: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings (HIGH confidence — official docs)
+- task_type proxy bug (fixed): https://github.com/BerriAI/litellm/issues/17759 — closed and merged in PR #18042; direct SDK calls unaffected (MEDIUM confidence — issue closed, may be version-specific)
+- 768-dim normalization requirement: Google documentation notes 3072-dim is pre-normalized; smaller dims need manual normalization. VectorStore already calls `faiss.normalize_L2()` in `add_vectors()`. (HIGH confidence)
 
 ---
 
-*Architecture analysis: 2026-02-24*
+*Architecture research for: FastCode v1.1 — CodeEmbedder migration to litellm.embedding() + VertexAI*
+*Researched: 2026-02-25*
