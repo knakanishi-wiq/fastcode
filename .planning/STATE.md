@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-26)
 ## Current Position
 
 Phase: 8 of 10 (v1.2 — Package System Foundation)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-02-26 — v1.2 roadmap created (Phases 8–10)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-26 — Phase 8 Plan 01 complete (pyproject.toml + uv.lock)
 
-Progress: [███████░░░] 70% (v1.0 + v1.1 complete; v1.2 not started)
+Progress: [████████░░] 75% (v1.0 + v1.1 complete; v1.2 Plan 08-01 complete)
 
 ## Performance Metrics
 
@@ -29,6 +29,7 @@ Progress: [███████░░░] 70% (v1.0 + v1.1 complete; v1.2 not s
 |-------|-------|----------|
 | 01–05 (v1.0) | 10 | ~2 min |
 | 06–07 (v1.1) | 3 | ~2 min |
+| 08 (v1.2 Plan 01) | 1 | 2 min |
 
 **Recent Trend:**
 - Last 5 plans: 2min, 2min, 3min, 2min, 2min
@@ -46,6 +47,8 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [v1.2 scope]: Pin uv to `0.10.6` in Dockerfile; never use `:latest`
 - [v1.1 deferred → Phase 10]: MODEL/LITELLM_MODEL independence is operational confusion risk — consolidate in DEBT-04
 - [v1.1 deferred → Phase 9]: embed_text() default task_type latent fragility — DEBT-02 makes line 415 explicit
+- [08-01]: Used [dependency-groups] dev (PEP 735) rather than [project.optional-dependencies] — stricter isolation, uv recommended approach
+- [08-01]: Did NOT add [tool.hatch.build.targets.wheel] — hatchling auto-discovered fastcode/ at repo root without it
 
 ### Pending Todos
 
@@ -58,5 +61,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: v1.2 roadmap created; Phase 8 ready to plan
+Stopped at: Completed 08-01-PLAN.md (pyproject.toml + uv.lock)
 Resume file: None
