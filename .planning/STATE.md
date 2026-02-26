@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-26)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** Phase 9 — Dockerfile and Code Cleanup (v1.2)
+**Current focus:** Phase 10 — Config Consolidation and Verification (v1.2)
 
 ## Current Position
 
-Phase: 9 of 10 (v1.2 — Dockerfile and Code Cleanup)
-Plan: 2 of 3 in current phase
-Status: Plan 02 complete
-Last activity: 2026-02-26 — Phase 9 Plan 02 complete (DEBT-01: dead platform import block removed from __init__.py; DEBT-02: task_type explicit in retriever.py)
+Phase: 10 of 10 (v1.2 — Config Consolidation and Verification)
+Plan: 1 of 3 in current phase
+Status: Plan 01 complete
+Last activity: 2026-02-26 — Phase 10 Plan 01 complete (DEBT-04: MODEL env var removed; answer_generator.py now reads llm_client.DEFAULT_MODEL directly)
 
-Progress: [█████████░] 87% (v1.0 + v1.1 complete; v1.2 Phases 8-9 Plans 01-02 complete)
+Progress: [█████████░] 90% (v1.0 + v1.1 complete; v1.2 Phases 8-10 Plans 01 complete)
 
 ## Performance Metrics
 
@@ -32,6 +32,7 @@ Progress: [█████████░] 87% (v1.0 + v1.1 complete; v1.2 Phase
 | 08 (v1.2) | 2 | 2 min |
 | 09-01 (v1.2) | 1 | ~3 min |
 | 09-02 (v1.2) | 1 | 3 min |
+| 10-01 (v1.2) | 1 | 2 min |
 
 **Recent Trend:**
 - Last 5 plans: 2min, 2min, 3min, 2min, 3min
@@ -47,7 +48,9 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 
 - [v1.2 scope]: PKG-01 requires hatchling editable install — follow PKG-01 spec (editable install for importability), not research recommendation (no build-system)
 - [v1.2 scope]: Pin uv to `0.10.6` in Dockerfile; never use `:latest`
-- [v1.1 deferred → Phase 10]: MODEL/LITELLM_MODEL independence is operational confusion risk — consolidate in DEBT-04
+- [10-01]: Removed MODEL env var entirely (not aliased) — aliasing would preserve confusion; clean break with MIGRATION NOTE (v1.2) is clearer
+- [10-01]: Kept import os and load_dotenv() in answer_generator.py — both still used by other code in the file
+- [v1.1 deferred → Phase 10, now DONE]: MODEL/LITELLM_MODEL independence was operational confusion risk — DEBT-04 resolved in 10-01
 - [v1.1 deferred → Phase 9]: embed_text() default task_type latent fragility — DEBT-02 makes line 415 explicit
 - [08-01]: Used [dependency-groups] dev (PEP 735) rather than [project.optional-dependencies] — stricter isolation, uv recommended approach
 - [08-01]: Did NOT add [tool.hatch.build.targets.wheel] — hatchling auto-discovered fastcode/ at repo root without it
@@ -67,5 +70,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-26
-Stopped at: Completed 09-02-PLAN.md (DEBT-01 and DEBT-02 resolved; __init__.py cleaned, retriever.py task_type explicit)
+Stopped at: Completed 10-01-PLAN.md (DEBT-04 resolved; MODEL env var removed, answer_generator.py reads llm_client.DEFAULT_MODEL directly)
 Resume file: None
