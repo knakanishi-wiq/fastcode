@@ -33,7 +33,16 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 
 ### Active
 
-(None — start next milestone with `/gsd:new-milestone`)
+<!-- v1.2 uv Migration & Tech Debt Cleanup -->
+
+- [ ] Migrate `requirements.txt` → `pyproject.toml` with project metadata and dependencies
+- [ ] Generate `uv.lock` lockfile
+- [ ] Separate dev/test extras from runtime dependencies
+- [ ] Update `Dockerfile` to install via `uv` instead of `pip`
+- [ ] Remove dead platform import block from `fastcode/__init__.py`
+- [ ] Make `task_type` explicit at `retriever.py` call sites (lines 415, 734)
+- [ ] Consolidate `MODEL` and `LITELLM_MODEL` env vars into one
+- [ ] Test `_stream_with_summary_filter()` chunk boundary behavior in live multi-turn session
 
 ### Out of Scope
 
@@ -87,5 +96,16 @@ All LLM and embedding calls route through litellm. Package is ~55,300 LOC Python
 | `embed_text()` default `task_type="RETRIEVAL_QUERY"` — retriever.py callers require zero changes | Backwards-compatible addition; intent is visible in embedder.py signature | ⚠ Revisit — retriever.py call sites (lines 415, 734) don't forward task_type explicitly; latent fragility if default changes |
 | `ENV TOKENIZERS_PARALLELISM=false` left in Dockerfile | Harmless no-op after sentence-transformers removal; R9 spec excluded it | ✓ Good — no harm; can be removed in a future cleanup |
 
+## Current Milestone: v1.2 uv Migration & Tech Debt Cleanup
+
+**Goal:** Modernize packaging with uv (pyproject.toml + lockfile + Dockerfile) and close the four open tech debt items from v1.1.
+
+**Target features:**
+- Full uv migration (pyproject.toml, uv.lock, Dockerfile, dev/test extras)
+- Remove dead `__init__.py` platform import block
+- Explicit `task_type` at `retriever.py` call sites
+- Consolidate `MODEL`/`LITELLM_MODEL` env vars into one
+- Streaming smoke test for `_stream_with_summary_filter()`
+
 ---
-*Last updated: 2026-02-25 after v1.1 milestone completion*
+*Last updated: 2026-02-26 after v1.2 milestone started*

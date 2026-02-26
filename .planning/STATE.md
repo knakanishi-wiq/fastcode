@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-25)
 
 ## Current Position
 
-Phase: milestone complete
-Plan: all complete
-Status: v1.1 VertexAI Embedding Migration shipped — 2 phases, 3 plans, 11/11 requirements satisfied
-Last activity: 2026-02-25 — v1.1 milestone completed and archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-26 — Milestone v1.2 started
 
 ## Performance Metrics
 
