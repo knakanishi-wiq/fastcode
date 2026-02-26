@@ -19,6 +19,21 @@ WORKDIR /app
 ENV UV_NO_DEV=1
 # Copy mode required for Docker overlay filesystem (prevents hardlink warnings)
 ENV UV_LINK_MODE=copy
+# Use OS native TLS (OpenSSL) instead of rustls, so system CA store is respected
+ENV UV_NATIVE_TLS=1
+
+# ARG busts the cache for the secret layer when switching between local/cloud builds.
+# Local: pass --build-arg CERT=1; cloud: omit (defaults to empty, caches as no-op).
+# Docker only keys on ARGs that are referenced inside a RUN — the `: "${CERT}"` expands
+# the variable (shell no-op) so Docker includes its value in the layer cache key.
+ARG CERT=
+# Inject corporate CA if provided (for SSL-inspecting proxies); no-op in cloud build
+RUN --mount=type=secret,id=corporate_ca,required=false \
+    : "${CERT}" && \
+    if [ -f /run/secrets/corporate_ca ]; then \
+        cp /run/secrets/corporate_ca /usr/local/share/ca-certificates/corporate.crt && \
+        update-ca-certificates; \
+    fi
 
 # Layer 3: Install dependencies only (cached unless pyproject.toml or uv.lock change)
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -27,6 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project
 
 # Layer 4: Install project source (cache invalidated on .py changes; packages not re-downloaded)
+COPY pyproject.toml uv.lock ./
 COPY fastcode/ fastcode/
 COPY api.py ./
 COPY config/ config/
