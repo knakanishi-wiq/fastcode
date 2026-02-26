@@ -1,8 +1,8 @@
 # Architecture Research
 
-**Domain:** Embedding backend migration — sentence-transformers to litellm.embedding() + VertexAI
-**Researched:** 2026-02-25
-**Confidence:** HIGH (codebase analysis + litellm official docs + VertexAI official docs)
+**Domain:** Python packaging migration — requirements.txt + pip + Dockerfile to pyproject.toml + uv.lock + uv Dockerfile
+**Researched:** 2026-02-26
+**Confidence:** HIGH (sourced from official uv documentation at docs.astral.sh/uv)
 
 ---
 
@@ -11,371 +11,421 @@
 ### System Overview
 
 ```
-config/config.yaml (embedding: section)
-       |
-       v
-fastcode/embedder.py  ←  REWRITE: CodeEmbedder
-  - embed_text(text, task_type)         ← task_type param added
-  - embed_batch(texts, task_type)       ← task_type param added
-  - embed_code_elements(elements)       ← calls embed_batch with RETRIEVAL_DOCUMENT
-  - embedding_dim: int                  ← hardcoded from config, not from model
-       |
-       |---------- called by ----------+
-       |                               |
-       v                               v
-fastcode/indexer.py              fastcode/retriever.py
-  embed_code_elements(elements)    embed_text(query)          ← RETRIEVAL_QUERY
-  embed_text(overview_text)        (in _semantic_search,
-  (RETRIEVAL_DOCUMENT both)         _select_relevant_repositories)
-       |                               |
-       v                               v
-fastcode/vector_store.py         fastcode/vector_store.py
-  initialize(embedding_dim)         search(query_vector)
-  add_vectors(vectors, metadata)
+┌─────────────────────────────────────────────────────────────┐
+│                      Project Root                            │
+├─────────────────────────────────────────────────────────────┤
+│  pyproject.toml    uv.lock      Dockerfile    .dockerignore  │
+│  (deps + meta)     (locked)     (uv-based)    (.venv excluded)│
+├─────────────────────────────────────────────────────────────┤
+│                  Build / Install Flow                         │
+├────────────────────┬────────────────────────────────────────┤
+│   Local Dev        │           Docker Build                   │
+│  uv sync           │  COPY uv binary                         │
+│  (all groups)      │  → uv sync --locked --no-dev            │
+│                    │                                          │
+│  uv sync --group   │  Layer 1: deps only (cache hit on       │
+│   test             │    source-only changes)                  │
+│                    │  Layer 2: COPY source + project sync    │
+└────────────────────┴────────────────────────────────────────┘
 ```
 
 ### Component Responsibilities
 
-| Component | Responsibility | Change Type |
-|-----------|----------------|-------------|
-| `fastcode/embedder.py` | All embedding calls; owns `embedding_dim` | REWRITE |
-| `fastcode/indexer.py` | Calls `embed_code_elements` (document) and `embed_text` (overview) | ADD `task_type` awareness |
-| `fastcode/retriever.py` | Calls `embed_text` (query) at 2 sites | ADD `task_type` awareness |
-| `fastcode/vector_store.py` | Receives `embedding_dim` from embedder; FAISS ops | NO CHANGE |
-| `fastcode/main.py` | Passes `self.embedder.embedding_dim` to `vector_store.initialize()` at 4 sites | NO CHANGE (dim source changes inside embedder) |
-| `config/config.yaml` | `embedding:` section fields | MODIFY — replace sentence-transformer fields |
-| `requirements.txt` | Remove sentence-transformers, torch | MODIFY |
+| Component | Responsibility | What Changes |
+|-----------|----------------|--------------|
+| `pyproject.toml` | Project metadata + all dependency declarations (runtime, dev, test) | NEW — replaces `requirements.txt` |
+| `uv.lock` | Exact pinned versions, cross-platform lockfile | NEW — committed to git |
+| `Dockerfile` | Multi-layer uv install pattern with cache mounts | MODIFIED — replaces `pip install -r requirements.txt` |
+| `requirements.txt` | Runtime dependency list | DELETE after migration |
+| `.dockerignore` | Exclude `.venv` from build context | ADD or MODIFY |
+| `.venv/` | Local virtual environment | LOCAL ONLY — never committed, never in Docker image |
 
 ---
 
 ## Recommended Project Structure
 
-No new files needed. This is a replacement rewrite of one module:
-
 ```
-fastcode/
-├── embedder.py          # REWRITE — CodeEmbedder backed by litellm.embedding()
-├── indexer.py           # TOUCH — pass task_type="RETRIEVAL_DOCUMENT" to embed calls
-├── retriever.py         # TOUCH — pass task_type="RETRIEVAL_QUERY" to embed_text calls
-├── vector_store.py      # NO CHANGE — dimension-agnostic
-├── main.py              # NO CHANGE — reads self.embedder.embedding_dim as before
-└── llm_client.py        # NO CHANGE — LLM calls only, not embedding
-config/
-└── config.yaml          # MODIFY embedding: section
-tests/
-└── test_embedding_smoke.py   # NEW — ADC smoke test parallel to existing LLM smoke test
+FastCode/                      # project root
+├── pyproject.toml             # NEW: replaces requirements.txt
+├── uv.lock                    # NEW: committed lockfile
+├── Dockerfile                 # MODIFIED: uv-based install
+├── .dockerignore              # ADD/MODIFY: exclude .venv
+├── docker-compose.yml         # UNCHANGED
+├── requirements.txt           # DELETE: after pyproject.toml migration
+├── fastcode/                  # UNCHANGED: application package
+│   └── ...
+├── tests/                     # UNCHANGED: pytest test suite
+│   └── ...
+├── api.py                     # UNCHANGED
+├── main.py                    # UNCHANGED
+└── config/                    # UNCHANGED
 ```
 
 ### Structure Rationale
 
-- **No new module for embedding client:** litellm.embedding() is a top-level function, same as litellm.completion(). The existing CodeEmbedder class boundary is preserved — callers (indexer, retriever, main) see no interface change.
-- **No embedding_client.py:** Unlike the LLM migration which centralized 5 disparate call sites, embedding has exactly one call site (CodeEmbedder). A separate module would add indirection with no benefit.
+- **pyproject.toml at root:** uv requires it at the project root to identify the project. It sits alongside `uv.lock` so both are at the same level.
+- **requirements.txt deleted:** After `uv add -r requirements.txt` completes and `uv.lock` is generated, `requirements.txt` serves no further purpose. Keeping it causes confusion about which file is authoritative.
+- **uv.lock committed:** The lockfile is cross-platform and must be committed for reproducible builds in CI and Docker. It is managed automatically by uv — never edit manually.
+- **.venv never committed or in Docker image:** The virtual environment is platform-specific. Docker builds recreate it from scratch via `uv sync`.
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Static `embedding_dim` from Config (replaces `get_sentence_embedding_dimension()`)
+### Pattern 1: pyproject.toml with Dependency Groups
 
-**What:** The new CodeEmbedder reads `embedding_dim` from `config["embedding"]["dimension"]` instead of querying it from the model object. The value is set in config.yaml.
+**What:** Runtime deps in `[project.dependencies]`, test-only deps in a named `[dependency-groups]` section. FastCode is a deployed service (not a published library), so `[dependency-groups]` (PEP 735, local-only) is correct — these deps are never published to PyPI.
 
-**When to use:** Always, for any API-backed embedding model where dimension is determined by the API call's `output_dimensionality` parameter rather than the model's intrinsic shape.
-
-**Why:** sentence-transformers returned dimension via `model.get_sentence_embedding_dimension()` because the local model object knows its own shape. litellm.embedding() makes a network call — there is no model object to query. Dimension is known from the model's documentation (gemini-embedding-001 default: 3072; with `output_dimensionality=768`: 768).
+**When to use:** This project. `[project.optional-dependencies]` is for published package extras (e.g., `pip install fastcode[plot]`). `[dependency-groups]` is for local tooling and test deps that should never be in the production container.
 
 **Trade-offs:**
-- Pro: No "probe embedding" call required at startup (avoids extra API round-trip)
-- Pro: Dimension is explicit in config, visible at a glance
-- Con: Config and actual output must be kept in sync; misconfiguration causes silent dimension mismatch at FAISS initialization
+- The `dev` group is the uv default — it installs automatically with `uv sync`. The `test` group must be explicitly requested with `--group test`.
+- `--no-dev` in the Dockerfile excludes the default `dev` group. The `test` group is already excluded by default (non-dev groups are opt-in).
 
 **Example:**
-```python
-# config/config.yaml
-embedding:
-  model: "vertex_ai/gemini-embedding-001"
-  dimension: 768              # must match output_dimensionality below
-  output_dimensionality: 768  # passed to litellm.embedding()
+```toml
+[project]
+name = "fastcode"
+version = "1.2.0"
+description = "Code intelligence backend with RAG pipeline and agentic retrieval"
+requires-python = ">=3.12"
+dependencies = [
+    # Core
+    "python-dotenv",
+    "pyyaml",
+    "click",
+    # Repository Management
+    "gitpython",
+    # Code Parsing
+    "tree-sitter",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-java",
+    "tree-sitter-go",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-rust",
+    "tree-sitter-c-sharp",
+    "libcst",
+    # Embeddings & Vector Store
+    "faiss-cpu",
+    "chromadb",
+    # Search & Retrieval
+    "rank-bm25",
+    "networkx",
+    # LLM Integration
+    "tiktoken",
+    "litellm[google]>=1.80.8",
+    # API
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "flask",
+    "flask-cors",
+    "python-multipart",
+    # Utilities
+    "tqdm",
+    "numpy",
+    "pandas",
+    "pathspec",
+    # Caching
+    "diskcache",
+    "redis",
+    # MCP Server
+    "mcp[cli]",
+]
 
-# fastcode/embedder.py
-class CodeEmbedder:
-    def __init__(self, config):
-        self.embedding_config = config.get("embedding", {})
-        self.model_name = self.embedding_config.get("model", "vertex_ai/gemini-embedding-001")
-        self.output_dimensionality = self.embedding_config.get("output_dimensionality", 768)
-        # Static from config — no API call at init time
-        self.embedding_dim = self.embedding_config.get("dimension", 768)
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+]
+# dev group left empty for now; add linting tools here later if needed
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 ```
 
-### Pattern 2: `task_type` as Parameter on `embed_text` and `embed_batch`
+### Pattern 2: uv Dockerfile with Intermediate Layer Caching
 
-**What:** Add `task_type: str = "RETRIEVAL_DOCUMENT"` parameter to `embed_text()` and `embed_batch()`. Indexing callers pass `RETRIEVAL_DOCUMENT`; query callers pass `RETRIEVAL_QUERY`.
+**What:** Copy the uv binary into the existing `python:3.12-slim-bookworm` base image (not switching to a uv-derived base). Use bind mounts for `pyproject.toml` and `uv.lock` in an intermediate layer to install deps before copying source code.
 
-**When to use:** When the embedding model uses task-differentiated representations (gemini-embedding-001's `RETRIEVAL_DOCUMENT` vs `RETRIEVAL_QUERY` produce meaningfully different vectors optimized for each role).
+**When to use:** Always for Docker builds. The intermediate layer technique means Docker only re-downloads dependencies when `uv.lock` or `pyproject.toml` changes — not on every source code change.
 
 **Trade-offs:**
-- Pro: Correct semantic alignment — documents and queries are encoded for their respective roles
-- Pro: Interface is explicit and self-documenting at the call site
-- Con: One additional parameter to thread through the call chain
-- Con: If `task_type` is accidentally omitted, the default falls back to `RETRIEVAL_DOCUMENT`; callers must be explicit
+- `--mount=type=cache` requires Docker BuildKit (enabled by default in Docker 23+; set `DOCKER_BUILDKIT=1` on older versions)
+- Pinning the uv version (`uv:0.6.x`) prevents surprise breakage; `uv:latest` is convenient but can silently break builds on uv updates
+- `UV_COMPILE_BYTECODE=1` increases build time slightly but improves container startup time
+- `UV_LINK_MODE=copy` avoids spurious warnings when the uv cache mount is on a different filesystem than the install target
 
-**Example:**
-```python
-# fastcode/embedder.py
-def embed_text(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
-    return self.embed_batch([text], task_type=task_type)[0]
+**Example (full Dockerfile for FastCode):**
+```dockerfile
+FROM python:3.12-slim-bookworm
 
-def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
-    # litellm.embedding() accepts task_type as a Vertex-specific kwarg
-    response = litellm.embedding(
-        model=self.model_name,
-        input=texts,
-        task_type=task_type,
-        dimensions=self.output_dimensionality,
-    )
-    vectors = np.array([item["embedding"] for item in response.data], dtype=np.float32)
-    return vectors
+# Copy uv binary from official image — pin to specific version for reproducibility
+COPY --from=ghcr.io/astral-sh/uv:0.6.0 /uv /uvx /bin/
 
-# fastcode/retriever.py — query embedding
-query_embedding = self.embedder.embed_text(query, task_type="RETRIEVAL_QUERY")
+# Compile bytecode for faster startup; copy mode avoids cross-filesystem link warnings
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-# fastcode/indexer.py — document embedding (index time)
-embedding = self.embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")
-elements_with_embeddings = self.embedder.embed_code_elements(element_dicts)  # internally uses RETRIEVAL_DOCUMENT
+# Install system dependencies for tree-sitter and git (same as before)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        build-essential \
+        curl \
+        ca-certificates && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Layer 1: Install runtime dependencies only, before copying source.
+# This layer is cached as long as pyproject.toml and uv.lock do not change.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
+
+# Layer 2: Copy source and install the project itself
+COPY fastcode/ fastcode/
+COPY api.py ./
+COPY config/ config/
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
+
+# Activate the venv by prepending its bin dir to PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Create necessary directories
+RUN mkdir -p /app/repos /app/data /app/logs
+
+EXPOSE 8001
+ENV PYTHONUNBUFFERED=1
+# TOKENIZERS_PARALLELISM=false removed — dead code after sentence-transformers removal
+
+CMD ["python", "api.py", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-### Pattern 3: One-Input-Per-Request Batching for gemini-embedding-001
+### Pattern 3: uv binary via COPY vs ghcr.io/astral-sh/uv base image
 
-**What:** gemini-embedding-001 accepts only a single input text per API request (confirmed by official Vertex AI docs). Batch embedding requires looping N requests.
+**What:** Two approaches for getting uv into a Docker build:
 
-**When to use:** Always for gemini-embedding-001. Other Vertex AI embedding models (text-embedding-004) accept up to 250 inputs.
+1. `COPY --from=ghcr.io/astral-sh/uv:VERSION /uv /uvx /bin/` — copies the uv binary into your own base image (recommended for FastCode)
+2. `FROM ghcr.io/astral-sh/uv:debian AS builder` — uses a uv-provided image as the base
 
-**Trade-offs:**
-- Con: Significant throughput reduction at index time — N documents = N API calls instead of ceil(N/250) calls
-- Pro: Simple implementation, no chunking logic needed
-- Mitigation: Indexing is a one-time offline operation; latency matters less than correctness
+**When to use:** Option 1 (COPY binary into existing base) is correct for FastCode because:
+- The current Dockerfile uses `python:3.12-slim-bookworm` and installs apt packages (`git`, `build-essential`)
+- Option 1 keeps the known-good base image — only one Dockerfile line changes to add uv
+- Option 2 requires auditing which Python version and Debian variant the uv-provided image uses
 
-**Example:**
-```python
-def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
-    if not texts:
-        return np.array([])
-    embeddings = []
-    for text in texts:
-        response = litellm.embedding(
-            model=self.model_name,
-            input=[text],          # single item — gemini-embedding-001 limit
-            task_type=task_type,
-            dimensions=self.output_dimensionality,
-        )
-        embeddings.append(response.data[0]["embedding"])
-    return np.array(embeddings, dtype=np.float32)
-```
-
-**Alternative:** If litellm's Python SDK performs SDK-level batching transparently (unconfirmed), pass all texts at once and verify behavior. Fall back to the loop if a batch returns errors.
-
-### Pattern 4: Response Vector Extraction
-
-**What:** litellm.embedding() returns an OpenAI-compatible response object. The embedding vector lives at `response.data[0]["embedding"]` (a Python list of floats).
-
-**Example:**
-```python
-response = litellm.embedding(
-    model="vertex_ai/gemini-embedding-001",
-    input=["some text"],
-    task_type="RETRIEVAL_DOCUMENT",
-    dimensions=768,
-)
-# Response structure:
-# response.data = [{"object": "embedding", "index": 0, "embedding": [float, ...]}]
-vector = np.array(response.data[0]["embedding"], dtype=np.float32)
-```
+**Trade-offs:** Option 1 adds one `COPY --from` line and is otherwise orthogonal to base image choice. Option 2 reduces the Dockerfile to pure uv-speak but risks Python version drift if the uv base image updates its Python.
 
 ---
 
 ## Data Flow
 
-### Index-Time Embedding Flow
+### Dependency Resolution Flow
 
 ```
-CodeIndexer.index_repository()
-  → embedder.embed_code_elements(element_dicts)
-      → embed_batch(texts, task_type="RETRIEVAL_DOCUMENT")
-          → for each text:
-              litellm.embedding(model, input=[text], task_type="RETRIEVAL_DOCUMENT", dimensions=768)
-          → np.array([vectors])   shape: (N, 768)
-  → elements[i].metadata["embedding"] = vector
-
-CodeIndexer._save_repository_overview()
-  → embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")
-      → embed_batch([overview_text], task_type="RETRIEVAL_DOCUMENT")
-          → litellm.embedding(model, input=[overview_text], task_type="RETRIEVAL_DOCUMENT", dimensions=768)
-      → vector   shape: (768,)
-  → vector_store.save_repo_overview(embedding=vector)
+requirements.txt (source of truth today)
+    |
+    v (one-time migration command)
+uv add -r requirements.txt
+    |
+    v (generates both files)
+pyproject.toml + uv.lock
+    |
+    +-----> local dev:   uv sync           (installs runtime + default dev group into .venv)
+    |
+    +-----> local test:  uv sync --group test (runtime + test group into .venv)
+    |
+    +-----> docker prod: uv sync --locked --no-dev (runtime only into /app/.venv)
+    |
+    +-----> CI:          uv sync --locked --group test (runtime + test group)
 ```
 
-### Query-Time Embedding Flow
+### Docker Build Layer Flow
 
 ```
-HybridRetriever._semantic_search(query)
-  → embedder.embed_text(query, task_type="RETRIEVAL_QUERY")
-      → litellm.embedding(model, input=[query], task_type="RETRIEVAL_QUERY", dimensions=768)
-      → vector   shape: (768,)
-  → vector_store.search(query_vector=vector)
-
-HybridRetriever._select_relevant_repositories(query)
-  → embedder.embed_text(query, task_type="RETRIEVAL_QUERY")   ← same pattern
-  → vector_store.search_repository_overviews(query_embedding=vector)
+Layer 1: Base image (python:3.12-slim-bookworm)
+    |
+Layer 2: apt packages (git, build-essential, curl, ca-certificates)
+          [cache: invalidated rarely — only on apt changes]
+    |
+Layer 3: uv binary COPY --from=ghcr.io/astral-sh/uv:0.6.0
+          [cache: invalidated only on uv version pin change]
+    |
+Layer 4: uv sync --locked --no-install-project --no-dev
+          [cache: invalidated only when pyproject.toml or uv.lock changes]
+    |
+Layer 5: COPY source (fastcode/, api.py, config/)
+          [cache: invalidated on any source change]
+    |
+Layer 6: uv sync --locked --no-dev (installs the project package itself)
+    |
+Final image
 ```
 
-### FAISS Initialization Flow
+### Key Data Flows
 
-```
-main.py: FastCode.__init__()
-  → self.embedder = CodeEmbedder(config)
-      → self.embedding_dim = config["embedding"]["dimension"]   # 768, from config.yaml
-      [NO API call at init time]
-  → self.vector_store = VectorStore(config)
-
-main.py: FastCode._index_repository()
-  → if self.vector_store.dimension is None:
-        self.vector_store.initialize(self.embedder.embedding_dim)   # initialize(768)
-        [FAISS IndexHNSWFlat(768, m, METRIC_INNER_PRODUCT)]
-
-retriever.py: HybridRetriever.reload_specific_repositories()
-  → if self.filtered_vector_store is None:
-        self.filtered_vector_store = VectorStore(config)
-        self.filtered_vector_store.initialize(self.embedder.embedding_dim)  # initialize(768)
-```
+1. **Migration (one-time):** Run `uv add -r requirements.txt` at project root. uv reads requirements.txt, resolves all deps, writes `pyproject.toml`, and generates `uv.lock`. Manually move pytest/pytest-asyncio/pytest-cov to `[dependency-groups] test`. Delete `requirements.txt` after verifying.
+2. **Lockfile update:** `uv lock` regenerates `uv.lock` from `pyproject.toml` constraints. Commit `uv.lock` changes alongside `pyproject.toml` changes in the same commit.
+3. **Adding a new dep:** `uv add <package>` — updates both `pyproject.toml` and `uv.lock` atomically. `uv add --group test pytest-mock` adds to the test group.
+4. **Running tests:** `uv run --group test pytest` or `uv sync --group test && pytest` — installs the test group before running.
 
 ---
 
 ## Integration Points
 
-### External Services
-
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| VertexAI gemini-embedding-001 | `litellm.embedding(model="vertex_ai/gemini-embedding-001", ...)` | ADC auth; VERTEXAI_PROJECT + VERTEXAI_LOCATION env vars required (same as LLM calls) |
-| FAISS | `VectorStore.initialize(dim)` — no change | Receives 768 instead of 384; existing index files must be deleted on first v1.1 run |
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `embedder.py` → litellm | `litellm.embedding()` direct call | No wrapper module needed — single call site |
-| `indexer.py` → `embedder.py` | `embed_code_elements(elements)` — no signature change | Internally calls `embed_batch(..., task_type="RETRIEVAL_DOCUMENT")` |
-| `indexer.py` → `embedder.py` | `embed_text(text, task_type="RETRIEVAL_DOCUMENT")` — new param at call site | indexer explicitly passes task_type |
-| `retriever.py` → `embedder.py` | `embed_text(text, task_type="RETRIEVAL_QUERY")` — new param at call site | retriever explicitly passes task_type |
-| `main.py` → `embedder.py` | `self.embedder.embedding_dim` — no change | Source of truth changes (config not model.get_sentence_embedding_dimension()); callers unchanged |
-| `vector_store.py` | `initialize(dimension)` — no change | Dimension value changes from 384 to 768; API unchanged |
-
----
-
-## Config Changes
-
-### config.yaml — `embedding:` section
-
-```yaml
-# BEFORE (sentence-transformers)
-embedding:
-  model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-  device: "auto"
-  batch_size: 32
-  max_seq_length: 512
-  normalize_embeddings: true
-
-# AFTER (litellm + VertexAI)
-embedding:
-  model: "vertex_ai/gemini-embedding-001"
-  dimension: 768               # must match output_dimensionality
-  output_dimensionality: 768   # 768 | 1536 | 3072 (default 3072 if omitted)
-  # device, batch_size, max_seq_length, normalize_embeddings — REMOVE (not applicable)
-```
-
-**Why 768 not 3072:** The PROJECT.md constraint states "FAISS index reindex required: embedding dimension changes (384 → 768)". 768 balances quality vs storage. Google's normalization note: 3072-dim embeddings are pre-normalized; 768-dim embeddings must be normalized manually (FAISS `normalize_L2` handles this already in `vector_store.add_vectors`).
-
----
-
-## Files: New vs Modified vs Unchanged
+### Files: New vs Modified vs Unchanged
 
 | File | Status | What Changes |
 |------|--------|--------------|
-| `fastcode/embedder.py` | REWRITE | Remove SentenceTransformer; replace with litellm.embedding(); add task_type param; change embedding_dim source |
-| `fastcode/indexer.py` | MODIFY (minimal) | Add `task_type="RETRIEVAL_DOCUMENT"` to `embed_text()` call at line 369 |
-| `fastcode/retriever.py` | MODIFY (minimal) | Add `task_type="RETRIEVAL_QUERY"` to `embed_text()` calls at lines 415 and 734 |
-| `fastcode/vector_store.py` | NO CHANGE | Dimension-agnostic |
-| `fastcode/main.py` | NO CHANGE | Reads `self.embedder.embedding_dim` — source changes internally |
-| `fastcode/llm_client.py` | NO CHANGE | LLM calls only |
-| `config/config.yaml` | MODIFY | Replace embedding: section fields |
-| `requirements.txt` | MODIFY | Remove sentence-transformers, torch; litellm already present |
-| `tests/test_embedding_smoke.py` | CREATE | ADC smoke test for embedding |
+| `requirements.txt` | DELETE | Replaced entirely by pyproject.toml + uv.lock |
+| `pyproject.toml` | NEW | All runtime deps, project metadata, test dependency group |
+| `uv.lock` | NEW | Committed lockfile, auto-managed by uv |
+| `Dockerfile` | MODIFIED | Replace `pip install -r requirements.txt` with uv pattern (see Pattern 2) |
+| `.dockerignore` | ADD/MODIFY | Add `.venv` exclusion |
+| `docker-compose.yml` | UNCHANGED | No changes needed — Docker build is internal detail |
+| `fastcode/` package | UNCHANGED | No packaging code changes |
+| `tests/` | UNCHANGED | pytest invocation unchanged; `uv run pytest` or `uv sync --group test && pytest` |
+| `api.py`, `main.py` | UNCHANGED | Application entry points unchanged |
+| `config/` | UNCHANGED | Configuration files unchanged |
 
----
+### Dev/Test Extras Separation
 
-## Build Order
+| Group | Contents | Install Command | Used In |
+|-------|----------|----------------|---------|
+| Runtime (`[project.dependencies]`) | All 30+ runtime deps | `uv sync --no-dev` | Docker production |
+| `test` (`[dependency-groups]`) | pytest, pytest-asyncio, pytest-cov | `uv sync --group test` | CI / local test runs |
+| `dev` (default group, optional) | Empty for now; add linting tools if desired | `uv sync` (installed by default) | Local dev |
 
-Dependencies dictate this order:
+The `test` group is explicitly separate from the default `dev` group. The `--no-dev` flag in the Dockerfile excludes only the default `dev` group. The `test` group is already excluded in Docker by default (non-dev groups require explicit `--group test` to install).
 
-**Step 1 — Rewrite `fastcode/embedder.py`**
-Pure replacement. No callers change until Step 2 and 3. Can be tested in isolation by constructing CodeEmbedder directly.
+### .dockerignore Required Additions
 
-**Step 2 — Touch `fastcode/indexer.py`** (2 sites)
-Add `task_type="RETRIEVAL_DOCUMENT"` at:
-- Line 369: `self.embedder.embed_text(overview_text)` → `self.embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")`
-- `embed_code_elements` requires no change — task_type is baked inside the method
+```
+.venv
+__pycache__
+*.pyc
+*.pyo
+.git
+.pytest_cache
+```
 
-**Step 3 — Touch `fastcode/retriever.py`** (2 sites)
-Add `task_type="RETRIEVAL_QUERY"` at:
-- Line 415: `self.embedder.embed_text(semantic_query_text)` → `self.embedder.embed_text(semantic_query_text, task_type="RETRIEVAL_QUERY")`
-- Line 734: `self.embedder.embed_text(query)` → `self.embedder.embed_text(query, task_type="RETRIEVAL_QUERY")`
+### PATH Activation in Docker
 
-**Step 4 — Update `config/config.yaml`**
-Replace the `embedding:` section. Remove `device`, `batch_size`, `max_seq_length`, `normalize_embeddings`. Add `dimension` and `output_dimensionality`.
-
-**Step 5 — Update `requirements.txt`**
-Remove `sentence-transformers`, `torch`. Confirm `litellm` is present (already used for LLM calls).
-
-**Step 6 — Write `tests/test_embedding_smoke.py`**
-Call `embedder.embed_text("hello world", task_type="RETRIEVAL_QUERY")` via ADC. Assert vector shape is `(768,)`. Skip if `VERTEXAI_PROJECT` not set (same pattern as LLM smoke test).
-
-**Step 7 — Delete existing FAISS indexes**
-Dimension change (384 → 768) makes old indexes incompatible. Document this in migration notes: clear `./data/vector_store/*.faiss` and `*.pkl` before first run.
+uv sync creates `.venv` inside `WORKDIR` (`/app/.venv`). Set `ENV PATH="/app/.venv/bin:$PATH"` after the final sync — this makes `python`, `uvicorn`, and other venv executables available directly in `CMD` and subsequent `RUN` instructions without needing `uv run`.
 
 ---
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Probing Dimension via a Real API Call at Init
+### Anti-Pattern 1: Copying .venv into Docker Image
 
-**What people do:** Call `litellm.embedding()` with a test string during `CodeEmbedder.__init__()`, then read `len(response.data[0]["embedding"])` to set `self.embedding_dim`.
+**What people do:** Run `uv sync` locally, then `COPY .venv /app/.venv` in the Dockerfile to skip the sync step inside Docker.
 
-**Why it's wrong:** Adds a real API round-trip (and cost) every time the application starts, including during tests and CI. Also fails fast if credentials are missing at startup rather than at actual use time.
+**Why it's wrong:** The local `.venv` is platform-specific (macOS vs Linux). Copying it into a Linux container causes binary incompatibilities for packages with native extensions (faiss-cpu, tree-sitter compiled grammars, libcst).
 
-**Do this instead:** Read `dimension` from `config["embedding"]["dimension"]`. Hardcode the known value in config.yaml. Verify alignment in the smoke test.
+**Do this instead:** Add `.venv` to `.dockerignore`. Always run `uv sync` inside the Docker build to create a Linux-native venv.
 
-### Anti-Pattern 2: Using Default task_type (No Parameter)
+### Anti-Pattern 2: Installing uv via pip or curl inside Dockerfile
 
-**What people do:** Call `litellm.embedding(model=..., input=[text])` without `task_type`, relying on the default.
+**What people do:** `RUN pip install uv` or `RUN curl -LsSf https://astral.sh/uv/install.sh | sh` inside the Dockerfile.
 
-**Why it's wrong:** The VertexAI default for `task_type` is `RETRIEVAL_QUERY`. Documents indexed without `RETRIEVAL_DOCUMENT` are semantically misaligned — the model encodes them as if they were queries. Similarity scores between documents and queries will be lower quality.
+**Why it's wrong:** `pip install uv` installs uv as a Python package (slower, awkward version pinning). The curl installer adds complexity and a network dependency at build time without a pinned version.
 
-**Do this instead:** Always pass `task_type` explicitly. Use `"RETRIEVAL_DOCUMENT"` for all indexing calls; use `"RETRIEVAL_QUERY"` for all query embedding calls.
+**Do this instead:** `COPY --from=ghcr.io/astral-sh/uv:0.6.0 /uv /uvx /bin/` — copies the statically linked uv binary directly from the official image. Pin the version tag for reproducibility.
 
-### Anti-Pattern 3: Keeping `embed_code_elements` as the Only Task-Type Entry Point
+### Anti-Pattern 3: Not Committing uv.lock
 
-**What people do:** Only add `task_type` to `embed_code_elements()` (which handles bulk indexing) but not to `embed_text()` (which handles overview indexing in `indexer.py` and all query embeddings in `retriever.py`).
+**What people do:** Add `uv.lock` to `.gitignore` (treating it like `node_modules` or `.venv`).
 
-**Why it's wrong:** `indexer._save_repository_overview()` calls `embed_text()` directly, not `embed_code_elements()`. `retriever.py` also calls `embed_text()` directly. All three paths need task_type.
+**Why it's wrong:** Without a committed lockfile, `uv sync --locked` fails in Docker builds (the `--locked` flag asserts the lockfile exists and is current). Without `--locked`, different Docker builds at different times may resolve different package versions, breaking reproducibility.
 
-**Do this instead:** Add `task_type` parameter to both `embed_text()` and `embed_batch()`. `embed_code_elements()` passes `RETRIEVAL_DOCUMENT` to `embed_batch()` internally.
+**Do this instead:** Commit `uv.lock`. It is a text file, diffable, and managed automatically by uv commands. Never edit it manually.
 
-### Anti-Pattern 4: Passing a Batch to litellm for gemini-embedding-001
+### Anti-Pattern 4: Keeping requirements.txt Alongside pyproject.toml
 
-**What people do:** Call `litellm.embedding(model=..., input=texts)` with a list of N texts, expecting batch processing.
+**What people do:** Keep `requirements.txt` as a backup or for tools that don't support pyproject.toml yet.
 
-**Why it's wrong:** gemini-embedding-001 accepts only a single input per request at the REST API level. Passing multiple inputs may silently fail or return incorrect results depending on the litellm version.
+**Why it's wrong:** Two authoritative dependency files will drift. The old Dockerfile line `pip install -r requirements.txt` will silently ignore pyproject.toml if not updated. CI or Docker might use one, developers the other.
 
-**Do this instead:** Loop over texts and call `litellm.embedding()` one input at a time. If batch behavior is needed, validate against the litellm version in use and check the actual response `len(response.data)` matches `len(input)`.
+**Do this instead:** Delete `requirements.txt` in the same commit that adds `pyproject.toml` and `uv.lock`. If a tool needs a requirements file, generate it on the fly: `uv export --no-dev > requirements.txt` (but do not commit the output).
+
+### Anti-Pattern 5: Using uv:latest in Dockerfile
+
+**What people do:** `COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/`
+
+**Why it's wrong:** `latest` resolves to a different version on every build. A uv update with breaking changes can silently break Docker builds with no diff in the repository.
+
+**Do this instead:** Pin to a specific version: `COPY --from=ghcr.io/astral-sh/uv:0.6.0 /uv /uvx /bin/`. Update the pin deliberately when upgrading uv.
+
+### Anti-Pattern 6: Putting Test Deps in [project.dependencies]
+
+**What people do:** Leave pytest/pytest-asyncio/pytest-cov in `[project.dependencies]` after migrating from requirements.txt (where they were mixed with runtime deps).
+
+**Why it's wrong:** Test deps bloat the production Docker image. Every `pip install fastcode` (or `uv sync`) install installs pytest unnecessarily in production containers.
+
+**Do this instead:** Move pytest, pytest-asyncio, pytest-cov to `[dependency-groups] test = [...]`. They will be excluded automatically from Docker builds using `--no-dev` (since `test` is not the default `dev` group, it's excluded by default without needing any flag).
+
+---
+
+## Build Order for Migration
+
+Dependencies dictate this sequence:
+
+**Step 1 — Generate pyproject.toml and uv.lock from requirements.txt**
+
+```bash
+# At project root
+uv init --no-workspace  # creates pyproject.toml skeleton if not present
+uv add -r requirements.txt  # migrates all deps; generates uv.lock
+```
+
+**Step 2 — Move test deps from [project.dependencies] to [dependency-groups]**
+
+Edit `pyproject.toml` manually:
+- Remove `pytest`, `pytest-asyncio`, `pytest-cov` from `[project.dependencies]`
+- Add `[dependency-groups]` section with `test = ["pytest", "pytest-asyncio", "pytest-cov"]`
+- Run `uv lock` to regenerate `uv.lock` reflecting the move
+
+**Step 3 — Rewrite Dockerfile**
+
+Replace the `pip install -r requirements.txt` block with the uv pattern from Pattern 2 above. Remove `ENV TOKENIZERS_PARALLELISM=false` (dead code after v1.1).
+
+**Step 4 — Add/update .dockerignore**
+
+Add `.venv`, `__pycache__`, `*.pyc`, `.pytest_cache` entries.
+
+**Step 5 — Delete requirements.txt**
+
+```bash
+git rm requirements.txt
+```
+
+**Step 6 — Verify**
+
+```bash
+# Local install
+uv sync              # installs runtime + default dev group
+uv sync --group test # adds test group
+
+# Run tests
+uv run --group test pytest
+
+# Build Docker image
+docker build -t fastcode:test .
+
+# Verify no test deps in image
+docker run --rm fastcode:test python -c "import pytest" && echo "FAIL: pytest in prod image"
+```
 
 ---
 
@@ -383,29 +433,26 @@ Dimension change (384 → 768) makes old indexes incompatible. Document this in 
 
 | Scale | Architecture Adjustments |
 |-------|--------------------------|
-| Single repo (hundreds of elements) | Loop-per-element works fine; indexing is ~minutes |
-| Multi-repo (thousands of elements) | Consider batching with `asyncio`/`litellm.aembedding()` at index time; not needed for v1.1 |
-| Live query path | Single `embed_text()` call per query — latency is ~100-200ms VertexAI API round-trip; acceptable |
+| Single developer | `uv sync` for local dev; `uv sync --group test` before running tests |
+| CI pipeline | `uv sync --locked --group test`; `--locked` ensures lockfile is in sync |
+| Multi-platform Docker builds | `uv.lock` is cross-platform; same lockfile works for both amd64 and arm64 builds |
 
 ### Scaling Priorities
 
-1. **First bottleneck:** Index-time API throughput — 1 call per element is slow for large repos. Mitigation for v1.1: not in scope; reindexing is offline. Future: `aembedding()` concurrency.
-2. **Second bottleneck:** Query embedding adds ~100-200ms latency per query round-trip. Mitigation: cache query embeddings (cache already exists in codebase).
+1. **First concern:** Layer cache invalidation. The intermediate layer (deps only, before source COPY) is the biggest win — ensures `docker build` doesn't re-download 30+ packages on every source change.
+2. **Second concern:** uv version pinning. Pin early, update deliberately. `latest` will cause problems at the worst possible time.
 
 ---
 
 ## Sources
 
-- Direct codebase analysis: `fastcode/embedder.py`, `fastcode/indexer.py`, `fastcode/retriever.py`, `fastcode/vector_store.py`, `fastcode/main.py`, `config/config.yaml` (HIGH confidence)
-- litellm embedding API: https://docs.litellm.ai/docs/embedding/supported_embedding (HIGH confidence — official docs, current)
-- litellm VertexAI embedding: https://docs.litellm.ai/docs/providers/vertex_embedding (HIGH confidence — official docs)
-- litellm task_type support for Vertex: https://docs.litellm.ai/docs/providers/vertex — `task_type` listed as Vertex-specific param (HIGH confidence)
-- gemini-embedding-001 output dimensions: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api — 3072 default, 768/1536/3072 supported via `output_dimensionality` (HIGH confidence — official docs)
-- gemini-embedding-001 single-input-per-request limit: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings (HIGH confidence — official docs)
-- task_type proxy bug (fixed): https://github.com/BerriAI/litellm/issues/17759 — closed and merged in PR #18042; direct SDK calls unaffected (MEDIUM confidence — issue closed, may be version-specific)
-- 768-dim normalization requirement: Google documentation notes 3072-dim is pre-normalized; smaller dims need manual normalization. VectorStore already calls `faiss.normalize_L2()` in `add_vectors()`. (HIGH confidence)
+- [uv Docker integration guide](https://docs.astral.sh/uv/guides/integration/docker/) — HIGH confidence, official docs
+- [uv project layout concepts](https://docs.astral.sh/uv/concepts/projects/layout/) — HIGH confidence, official docs
+- [uv dependency groups and optional deps](https://docs.astral.sh/uv/concepts/projects/dependencies/) — HIGH confidence, official docs
+- [uv project guide with migration from requirements.txt](https://docs.astral.sh/uv/guides/projects/) — HIGH confidence, official docs
+- ghcr.io/astral-sh/uv Docker image — HIGH confidence (referenced in official uv docs)
 
 ---
 
-*Architecture research for: FastCode v1.1 — CodeEmbedder migration to litellm.embedding() + VertexAI*
-*Researched: 2026-02-25*
+*Architecture research for: FastCode v1.2 — uv migration (pyproject.toml + uv.lock + Dockerfile)*
+*Researched: 2026-02-26*

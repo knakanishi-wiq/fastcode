@@ -1,146 +1,231 @@
-# Feature Landscape
+# Feature Research
 
-**Domain:** LLM provider abstraction layer migration (litellm + VertexAI)
-**Researched:** 2026-02-24
-**Confidence:** MEDIUM (core litellm API: HIGH from Nanobot reference impl + training; VertexAI specifics: MEDIUM — official docs unavailable during research, verified patterns from nanobot/nanobot/providers/litellm_provider.py)
+**Domain:** uv packaging migration — requirements.txt → pyproject.toml + uv.lock for Python app
+**Researched:** 2026-02-26
+**Confidence:** HIGH — sourced from uv 0.10.4 CLI help (local) and official docs.astral.sh
 
 ---
 
-## Table Stakes
+> This file replaces the v1.0/v1.1 litellm migration research. v1.2 milestone focus is uv packaging only.
 
-Features that must work or the migration is broken. Each maps to an existing call site in the codebase.
+## Feature Landscape
 
-| Feature | Why Expected | Complexity | Call Site | Notes |
-|---------|--------------|------------|-----------|-------|
-| `litellm.completion()` sync call | Replaces `openai.chat.completions.create()` and `anthropic.messages.create()` in answer_generator.py and query_processor.py | Low | `answer_generator._generate_openai()`, `answer_generator._generate_anthropic()`, `query_processor._call_openai()`, `query_processor._call_anthropic()` | litellm returns OpenAI-compatible response objects; `response.choices[0].message.content` works unchanged |
-| `litellm.completion(..., stream=True)` streaming | `answer_generator.generate_stream()` and `_stream_with_summary_filter()` both iterate over streaming chunks; must preserve `chunk.choices[0].delta.content` pattern | Medium | `answer_generator._generate_openai_stream()`, `answer_generator._generate_anthropic_stream()` | The existing OpenAI streaming chunk shape is preserved by litellm; Anthropic's `stream.text_stream` pattern must be replaced with the OpenAI-compatible chunk iterator |
-| `vertex_ai/` model prefix for VertexAI routing | litellm routes to VertexAI when model is prefixed `vertex_ai/` (e.g. `vertex_ai/gemini-1.5-pro`) | Low | All 4 call sites — model name set via `os.getenv("MODEL")` | Requires no code change to call sites; only env var `MODEL=vertex_ai/gemini-1.5-pro` |
-| ADC authentication (no explicit API key) | VertexAI uses Application Default Credentials; litellm respects ADC natively for `vertex_ai/` models when no explicit key passed | Low | `_initialize_client()` in answer_generator.py, query_processor.py, iterative_agent.py | `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` env vars required; no `api_key` param needed |
-| `VERTEXAI_PROJECT` + `VERTEXAI_LOCATION` env vars | litellm reads these to construct VertexAI endpoint; replaces `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for VertexAI | Low | `.env` file and Docker config | Existing `BASE_URL` env var no longer needed for VertexAI |
-| `max_tokens` parameter pass-through | `answer_generator.py` passes `max_tokens=20000`; `iterative_agent.py` passes `max_tokens=6000`; must reach VertexAI model | Low | All 4 call sites | litellm passes `max_tokens` to all providers; VertexAI models use this correctly |
-| `temperature` parameter pass-through | Set to 0.4 (answer generation), 0.3 (query processing), 0.2 (agent) — must reach VertexAI | Low | All 4 call sites | Standard parameter, litellm forwards to all providers |
-| OpenAI-compatible response object | Existing code accesses `response.choices[0].message.content` — litellm must return this shape | Low | `answer_generator._generate_openai()`, `query_processor._call_openai()` | litellm normalizes all provider responses to OpenAI format; confirmed by Nanobot's `_parse_response()` using same pattern |
-| `litellm.drop_params = True` | Some VertexAI models reject unknown parameters; prevents `BadRequestError`-equivalent crashes | Low | Global config at startup | Already used in Nanobot's `LiteLLMProvider.__init__()` — must carry to FastCode |
-| Remove `openai` + `anthropic` direct client init | `_initialize_client()` in 3 files creates `OpenAI(...)` or `Anthropic(...)` objects — these must be removed entirely | Medium | `answer_generator.py`, `query_processor.py`, `iterative_agent.py` | No wrapper object needed; litellm functions are called directly with model name |
+### Table Stakes (Users Expect These)
+
+Features a correct uv migration must include. Missing any of these makes the migration incomplete or broken.
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `pyproject.toml` with `[project]` table | Required for `uv sync`, `uv lock`, `uv add` to treat the repo as a uv project. Without it, only the `uv pip` compatibility shim is available | LOW | Minimum required fields: `name`, `version`. All current `requirements.txt` packages migrate to `project.dependencies` |
+| `requires-python = ">=3.12"` | Communicates minimum Python version; prevents installs on incompatible interpreters; enforced by uv during resolution | LOW | Matches current `FROM python:3.12-slim-bookworm` in Dockerfile |
+| `uv.lock` committed to VCS | Cross-platform universal lockfile captures exact resolved versions. Required for reproducible installs in Docker and CI. The entire value proposition of migrating from unpinned requirements.txt | LOW | Generated by `uv lock` or auto-updated by `uv sync`. Never edit manually. TOML format, human-readable |
+| `[dependency-groups] dev = [...]` | Separates pytest, pytest-asyncio, pytest-cov from runtime. Without this, Docker production images install test frameworks unnecessarily | LOW | PEP 735 standard, native to uv. Use `[dependency-groups]` not `[project.optional-dependencies]` for app (non-published) dev deps. Excluded via `--no-dev` flag |
+| `litellm[google]>=1.80.8` extras preserved | The `[google]` extra on litellm is already in requirements.txt and is required for VertexAI via ADC. Must carry through to pyproject.toml | LOW | Syntax in pyproject.toml: `"litellm[google]>=1.80.8"`. Dependency extras are distinct from project-level optional extras |
+| `uv sync --locked` in CI | Enforces lockfile is committed and current. Fails loudly if pyproject.toml was changed without re-running `uv lock`. Catches developer workflow mistakes | LOW | Use as the install step in GitHub Actions. Replaces `pip install -r requirements.txt` in CI |
+| Dockerfile updated to `uv sync --frozen --no-dev` | Replaces `pip install --no-cache-dir -r requirements.txt`. `--frozen` = trust lockfile without re-validating against pyproject.toml; deterministic production builds | MEDIUM | Requires uv installed in image and uv.lock + pyproject.toml COPYed before source. See Docker pattern below |
+
+### Differentiators (Competitive Advantage)
+
+Features beyond the minimum that meaningfully improve the developer and operator experience.
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Docker layer caching via `--no-install-project` | Deps layer cached until uv.lock changes; source code changes do not invalidate the expensive dependency install layer. Cuts rebuilds from ~60s to ~5s on source-only changes | MEDIUM | Two-step pattern: bind-mount pyproject.toml + uv.lock, run `uv sync --frozen --no-dev --no-install-project`, then COPY source, then `uv sync --frozen --no-dev`. The first `uv sync` installs all deps without touching source |
+| `uv add -r requirements.txt` for bulk migration | Imports all current deps into pyproject.toml in one command and immediately generates uv.lock. Eliminates manual copy-paste of ~35 packages | LOW | One-time migration command. Then manually move pytest/pytest-asyncio/pytest-cov to `[dependency-groups] dev` |
+| `ENV PATH="/app/.venv/bin:$PATH"` in Dockerfile | Activates the uv-managed virtualenv without requiring `uv run` or `source .venv/bin/activate`. The existing `CMD ["python", "api.py"]` continues to work unchanged | LOW | Add this single ENV line; no other CMD changes needed |
+| `uv lock --check` in CI (pre-sync validation) | Extra safety: explicitly validates lockfile is current before install. Catches edge cases where uv sync --locked might not catch drift | LOW | Optional belt-and-suspenders addition after primary CI migration is stable |
+| `UV_COMPILE_BYTECODE=1` in Dockerfile | Pre-compiles .pyc files at image build time; improves FastAPI server startup time for the first request | LOW | Add as `ENV UV_COMPILE_BYTECODE=1`. Trade: slightly longer build, faster cold-start. Low-priority optimization |
+| Remove `TOKENIZERS_PARALLELISM=false` ENV | This was added to suppress HuggingFace tokenizer warnings from sentence-transformers. That dependency was removed in v1.1. The ENV is a dead no-op | LOW | Delete from Dockerfile during the uv migration cleanup pass |
+
+### Anti-Features (Commonly Requested, Often Problematic)
+
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| `uv pip install -r requirements.txt` (keep pip interface) | Seems like a minimal change — just swap pip for uv pip for speed | `uv pip` is a pip-compatibility shim that bypasses the lockfile entirely. No uv.lock is created or consulted. You get uv's download speed but zero reproducibility guarantees. Defeats the purpose of migrating | Use `uv sync --frozen` from pyproject.toml + uv.lock |
+| `[project.optional-dependencies] dev = [...]` for test deps | nanobot in this same repo uses this pattern; it looks familiar | `optional-dependencies` is for extras that end-users of a *published package* can opt into (e.g., `pip install fastcode[dev]`). FastCode is not published to PyPI. Using this table for dev deps is semantically wrong, and the `--extra dev` flag syntax is more awkward than `--no-dev` | Use `[dependency-groups] dev = [...]` — PEP 735, native to uv, `--dev`/`--no-dev` shorthand works |
+| `uv sync --frozen` in local development | Faster (skips lockfile validation) | In development, you want uv to detect when pyproject.toml has diverged from uv.lock and warn/update. `--frozen` silently ignores drift, leading to mystery bugs where your installed env doesn't match what you declared | Use no-flag `uv sync` locally. Reserve `--frozen` for Docker builds only |
+| uv workspace configuration (`[tool.uv.workspace]`) | nanobot is a sibling package in the same repo; might seem natural to declare a monorepo workspace | FastCode and nanobot are independent deployable services with separate Python version constraints and independent lockfiles. A workspace merges dependency resolution across members, potentially creating unsatisfiable conflicts. nanobot has its own pyproject.toml + hatchling setup already | Keep FastCode's pyproject.toml independent. nanobot remains its own isolated package |
+| Multi-stage Docker build (source excluded from final image) | Produces a minimal final image with only the .venv, no source | FastCode's `CMD ["python", "api.py"]` runs source directly — source is not installed as a Python package with entry points. Multi-stage without-source only works when the app is installed as a package and invoked via its entry point | Use single-stage build with two-layer caching pattern. Source must be present at runtime |
+| `[build-system]` section in pyproject.toml | Looks standard; nanobot has it; feels required | `[build-system]` is only needed when building and publishing a Python distribution (wheel/sdist to PyPI). FastCode is an application, not a library. Adding it adds hatchling/setuptools as a build dependency for no benefit | Omit `[build-system]` entirely. uv manages FastCode as an application, not a package to publish |
 
 ## Feature Dependencies
 
 ```
-ADC authentication → VERTEXAI_PROJECT + VERTEXAI_LOCATION env vars
-vertex_ai/ prefix → ADC authentication (prefix tells litellm which auth to use)
-litellm.completion() sync → Remove direct client init
-litellm.completion(stream=True) → Preserve chunk.choices[0].delta.content iteration pattern
-litellm.drop_params → Global config at startup (before any LLM call)
+[uv.lock generated]
+    └──requires──> [pyproject.toml with [project] table]
+
+[uv sync --frozen in Dockerfile]
+    └──requires──> [uv.lock committed to VCS]
+                       └──requires──> [pyproject.toml exists]
+
+[Docker layer caching (--no-install-project)]
+    └──requires──> [uv.lock available as separate COPY target]
+                       └──requires──> [pyproject.toml exists]
+
+[uv sync --locked in CI]
+    └──requires──> [uv.lock committed to VCS]
+
+[--no-dev exclusion in Docker]
+    └──requires──> [[dependency-groups] dev defined in pyproject.toml]
+                       └──requires──> [pytest/pytest-asyncio/pytest-cov moved out of runtime deps]
 ```
 
----
+### Dependency Notes
 
-## Differentiators
+- **pyproject.toml must exist before any other uv project command:** `uv lock`, `uv sync`, and `uv add` all locate the project root by finding pyproject.toml. Without it, only the `uv pip` compatibility shim is available.
+- **uv.lock must be committed before Docker pattern works:** Both `--frozen` and `--locked` require the lockfile to be present on disk. The workflow is: generate locally → commit → CI/Docker use the committed lockfile.
+- **Dev group separation enables `--no-dev` in Docker:** Without `[dependency-groups] dev`, there is no uv-level mechanism to exclude pytest/pytest-cov from the production image. Both are in the same flat requirements.txt today.
+- **`--no-install-project` optimization requires two sync steps:** The first step installs deps without source (bind-mounted pyproject.toml only); the second step after `COPY . /app` installs the project itself. This keeps the deps layer cacheable.
 
-Features litellm provides beyond the minimum migration requirement. These are available without extra code but should be consciously decided about.
+## MVP Definition
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| `litellm.token_counter(model, messages)` | Replaces `tiktoken.encoding_for_model()` used in `fastcode/utils.py`; works for VertexAI model names that tiktoken doesn't know | Medium | Currently `count_tokens()` in `utils.py` uses tiktoken — will fail with `vertex_ai/gemini-1.5-pro` because tiktoken has no Gemini tokenizer. litellm token_counter is model-aware. This is actually a table-stakes dependency that gets promoted to differentiator because the fix is in a separate file |
-| `litellm.acompletion()` async version | FastCode is synchronous today but FastAPI runs in async context; using `acompletion` would unblock the event loop during LLM calls | High | Out of scope for this migration (sync-to-async is a separate refactor), but available if desired. Nanobot uses `acompletion` exclusively |
-| Provider fallback / retry config | `litellm.completion()` supports `fallbacks=[...]` and `num_retries=3`; auto-retries on rate limit or transient errors | Medium | Not needed for initial migration but reduces operational fragility without code changes |
-| `litellm.success_callback` / `litellm.failure_callback` | Hooks for logging every LLM call cost, token usage, and latency to external systems | Medium | Useful for observability in GCP; not needed for migration |
-| Budget tracking via `litellm.max_budget` | Prevent runaway costs in GCP; set a per-session or global token/cost limit | Low | Relevant for production GCP deployment |
-| `litellm.suppress_debug_info = True` | Disables noisy default litellm logging output | Low | Should be set at startup; already in Nanobot reference impl |
-| Model aliasing via `litellm.model_alias_map` | Map `gpt-4` → `vertex_ai/gemini-1.5-pro` in one place; existing code passes model name from env var so this is largely irrelevant | Low | Not needed given env-var-driven model selection |
+### Launch With (v1.2 — the migration milestone)
 
----
+- [ ] `pyproject.toml` with `[project]` table: name, version, requires-python, all runtime deps from requirements.txt
+- [ ] `uv.lock` generated by `uv lock` and committed
+- [ ] `[dependency-groups] dev` containing pytest, pytest-asyncio, pytest-cov
+- [ ] Dockerfile updated: uv installed via distroless copy, `uv sync --frozen --no-dev` replaces pip, `.venv/bin` on PATH
+- [ ] Docker layer caching: deps installed before source COPY using `--no-install-project` + bind mounts
+- [ ] CI updated: `uv sync --locked` (or `uv sync --frozen` with pre-committed lockfile)
+- [ ] `TOKENIZERS_PARALLELISM=false` ENV removed from Dockerfile (dead code from v1.1)
 
-## Anti-Features
+### Add After Validation (v1.x)
 
-Things to explicitly NOT build or enable during this migration.
+- [ ] `uv lock --check` in CI — add after confirming primary CI is stable with `uv sync --locked`
+- [ ] `UV_COMPILE_BYTECODE=1` in Dockerfile — micro-optimization after performance baseline measured
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| litellm Proxy server | litellm has an optional HTTP proxy server mode (`litellm --port 8000`); it is a separate deployment concern that adds infra complexity | Use litellm as a Python library only (`import litellm`) — same as Nanobot does |
-| Custom `LLMProvider` wrapper class | Tempting to build an abstraction layer on top of litellm (like Nanobot's `LiteLLMProvider`); adds indirection with no benefit in FastCode's simpler synchronous call pattern | Call `litellm.completion()` directly at each call site |
-| OpenAI compatibility shim / `openai` SDK kept alongside litellm | Keeping `from openai import OpenAI` alongside litellm creates two code paths and contradicts the migration goal | Remove `openai` and `anthropic` imports entirely from the 4 affected files after migration |
-| `BASE_URL` env var for VertexAI | The existing `BASE_URL` pattern was for OpenRouter/Ollama; VertexAI does not use a custom base URL — litellm constructs it from `VERTEXAI_PROJECT` + `VERTEXAI_LOCATION` | Remove `BASE_URL` from VertexAI config; document it as OpenRouter-specific if kept for other providers |
-| Multiple active providers simultaneously | Out of scope per PROJECT.md; selecting between providers at runtime adds complexity | One `MODEL` env var = one active provider; change env var to switch |
-| Tool calling / function calling via litellm | Nanobot uses litellm's tool_calls support; FastCode does not use structured tool calling (agent uses internal Python tool dispatch, not LLM-native tool calling) | Do not add tool_calls support during this migration |
-| litellm caching layer | litellm has built-in Redis/in-memory caching for identical prompts; FastCode already has its own `CacheManager` for BM25/vector results | Do not enable litellm's semantic cache — it would conflict with FastCode's existing cache strategy and introduce unexpected behavior |
+### Future Consideration (v2+)
 
----
+- [ ] `uv run` as primary dev entrypoint — requires team adoption; current `python api.py` pattern works fine
+- [ ] Multi-stage Docker build — only worthwhile if FastCode is restructured as an installable package with entry points
 
-## Feature Dependencies (Full Map)
+## Feature Prioritization Matrix
 
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| pyproject.toml with runtime deps | HIGH | LOW | P1 |
+| uv.lock committed | HIGH | LOW | P1 |
+| [dependency-groups] dev | HIGH | LOW | P1 |
+| Dockerfile: uv sync --frozen --no-dev | HIGH | MEDIUM | P1 |
+| Docker layer caching (--no-install-project) | MEDIUM | MEDIUM | P1 |
+| CI: uv sync --locked | HIGH | LOW | P1 |
+| Remove TOKENIZERS_PARALLELISM=false | LOW | LOW | P1 (cleanup) |
+| uv add -r requirements.txt (migration cmd) | HIGH | LOW | P1 (one-time) |
+| uv lock --check in CI | MEDIUM | LOW | P2 |
+| UV_COMPILE_BYTECODE=1 | LOW | LOW | P3 |
+| uv run as dev entrypoint | LOW | LOW | P3 |
+
+**Priority key:**
+- P1: Must have for launch
+- P2: Should have, add when possible
+- P3: Nice to have, future consideration
+
+## Key Behaviors to Understand
+
+### `uv sync` flag semantics (HIGH confidence — official docs)
+
+| Flag | Lockfile validation | Behavior if lockfile out of date | Use when |
+|------|--------------------|---------------------------------|----------|
+| (none) | Checks lockfile | Updates lockfile silently, then syncs | Local development |
+| `--locked` | Strict check | **Errors** — does not update lockfile | CI pipelines |
+| `--frozen` | Skips entirely | Silently uses existing lockfile | Docker builds where lockfile is pre-trusted |
+
+The distinction matters: use `--locked` when you want CI to fail if a developer forgot to commit an updated lockfile. Use `--frozen` in Docker where the lockfile was already validated by a prior CI step.
+
+### `uv sync` vs `uv pip install` (HIGH confidence)
+
+`uv pip install` is a pip-compatibility shim. It does not read pyproject.toml as a project, does not create or consult uv.lock, and does not participate in dependency groups. It is behaviorally equivalent to `pip install` — just faster. It provides no reproducibility guarantees. Use `uv sync` for all project-based installs.
+
+### `[dependency-groups]` vs `[project.optional-dependencies]` for dev deps (HIGH confidence)
+
+For FastCode — an application, not a published library:
+
+```toml
+# CORRECT for an app:
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=4"]
+
+# WRONG for an app (used in nanobot because nanobot IS a published library):
+[project.optional-dependencies]
+dev = ["pytest>=8", ...]
 ```
-[Must work — Table Stakes]
-litellm.completion() sync
-  └─ requires: model prefix "vertex_ai/" in MODEL env var
-  └─ requires: VERTEXAI_PROJECT env var
-  └─ requires: VERTEXAI_LOCATION env var
-  └─ requires: ADC credentials (gcloud auth application-default login locally,
-               service account / workload identity in GCP)
-  └─ requires: litellm.drop_params = True (set at startup)
 
-litellm.completion(stream=True)
-  └─ requires: litellm.completion() sync (same code path)
-  └─ requires: chunk iteration pattern preserved:
-               for chunk in response:
-                   chunk.choices[0].delta.content  ← same as current OpenAI pattern
-               (Anthropic stream.text_stream must be REPLACED with this pattern)
+The `[dependency-groups]` table (PEP 735) is local-only — not published to PyPI. The `--dev` / `--no-dev` shorthand flags work only with the `dev` dependency group, not with optional-dependencies.
 
-Token counting compatibility
-  └─ currently: tiktoken in fastcode/utils.py
-  └─ problem: tiktoken has no tokenizer for VertexAI/Gemini model names
-  └─ fix: replace count_tokens() with litellm.token_counter(model, messages)
-           OR use cl100k_base as fallback (approximate but good enough)
+### pyproject.toml: required vs optional sections (HIGH confidence)
 
-[Differentiator — should enable]
-litellm.suppress_debug_info = True  (no dependency, just startup config)
-litellm.drop_params = True          (must be set before first completion call)
+| Section | Required for uv app? | Notes |
+|---------|---------------------|-------|
+| `[project]` | YES | Entry point for uv project discovery |
+| `[project] name` | YES | Project identifier |
+| `[project] version` | YES | Can use `dynamic = ["version"]` later |
+| `[project] dependencies` | NO (but needed) | Runtime dep list; replaces requirements.txt |
+| `[project] requires-python` | NO (strongly recommended) | `">=3.12"` matches current Dockerfile |
+| `[build-system]` | NO | Only if building distributions for PyPI. Omit for FastCode |
+| `[dependency-groups]` | NO | Where dev deps live; needed to get `--no-dev` exclusion |
+| `[tool.uv]` | NO | Only for uv-specific config overrides |
+| `[tool.pytest.ini_options]` | NO | Can migrate existing pytest config here |
 
-[Anti-features — must NOT build]
-LiteLLM Proxy server
-Custom wrapper class around litellm
-Dual openai + litellm code paths
+### Recommended Docker pattern for FastCode (HIGH confidence)
+
+```dockerfile
+FROM python:3.12-slim-bookworm
+
+# System deps (unchanged from current Dockerfile)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git build-essential curl ca-certificates && \
+    apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Install uv from distroless image (pin version for reproducibility)
+COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /uvx /bin/
+
+WORKDIR /app
+
+# Layer 1: install dependencies only (cached until uv.lock changes)
+# bind-mount pyproject.toml and uv.lock so they're available but not COPYed yet
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project
+
+# Layer 2: source code (invalidated on every code change)
+RUN mkdir -p /app/repos /app/data /app/logs
+COPY fastcode/ fastcode/
+COPY api.py ./
+COPY config/ config/
+
+# Layer 3: install the project itself (fast — deps already in venv from Layer 1)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# Activate the uv-managed virtualenv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+# Removed: TOKENIZERS_PARALLELISM=false (dead code after v1.1 sentence-transformers removal)
+
+EXPOSE 8001
+CMD ["python", "api.py", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
----
-
-## MVP Recommendation
-
-For this migration, the minimum viable feature set is:
-
-1. **`litellm.completion()` with `vertex_ai/` prefix** — replaces all 4 provider-specific call paths
-2. **`stream=True` support** — preserves `answer_generator.generate_stream()` without behavior change
-3. **ADC auth via env vars** (`VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`) — no secrets in code
-4. **`litellm.drop_params = True` at startup** — prevents parameter rejection crashes
-5. **Token counting fix** — replace tiktoken in `utils.py` with a VertexAI-compatible counter
-
-Defer:
-- `litellm.acompletion()` async: Requires FastCode sync→async refactor — separate milestone
-- Observability callbacks: Nice-to-have for production; not needed for functional migration
-- Budget tracking: Operational concern, post-migration
-
----
-
-## Complexity Assessment Per Call Site
-
-| File | Current Pattern | litellm Replacement | Effort |
-|------|----------------|---------------------|--------|
-| `fastcode/answer_generator.py` | `OpenAI(...)` + `Anthropic(...)` init; two `_generate_*` methods + two `_generate_*_stream` methods | Single `litellm.completion()` call with `stream=True/False`; remove `_generate_openai`, `_generate_openai_stream`, `_generate_anthropic`, `_generate_anthropic_stream` | Medium — streaming filter logic in `_stream_with_summary_filter()` stays unchanged; only the generator source changes |
-| `fastcode/query_processor.py` | `OpenAI(...)` + `Anthropic(...)` init; `_call_openai()` + `_call_anthropic()` methods | Single `litellm.completion()` call; remove both `_call_*` methods and `_initialize_llm_client()` | Low — no streaming, simple text response |
-| `fastcode/iterative_agent.py` | Same init pattern as query_processor; uses `openai_chat_completion()` helper from `llm_utils.py` | `litellm.completion()` directly; remove `_initialize_client()` | Low-Medium — must read remaining call sites to confirm (file too large to read fully) |
-| `fastcode/llm_utils.py` | `openai_chat_completion()` helper with `max_tokens`/`max_completion_tokens` fallback | Possibly delete entirely, or replace with thin litellm wrapper; litellm's `drop_params=True` handles the `max_completion_tokens` fallback case automatically | Low — likely can be deleted |
-| `fastcode/utils.py` | `count_tokens()` uses `tiktoken.encoding_for_model()` | Replace with `litellm.token_counter(model, text)` or fallback to `cl100k_base` tokenizer | Low — isolated utility function |
-
----
+Key changes from current Dockerfile:
+1. `COPY --from=ghcr.io/astral-sh/uv:0.10.4` replaces the `curl`-based uv install
+2. `uv sync --frozen --no-dev` replaces `pip install --no-cache-dir -r requirements.txt`
+3. `COPY requirements.txt` removed; replaced by bind-mounted pyproject.toml + uv.lock
+4. `ENV PATH="/app/.venv/bin:$PATH"` activates the .venv
+5. `TOKENIZERS_PARALLELISM=false` removed (dead since v1.1)
 
 ## Sources
 
-- Codebase analysis: `/Users/knakanishi/Repositories/FastCode/fastcode/answer_generator.py` (direct read)
-- Codebase analysis: `/Users/knakanishi/Repositories/FastCode/fastcode/query_processor.py` (direct read)
-- Codebase analysis: `/Users/knakanishi/Repositories/FastCode/fastcode/iterative_agent.py` (partial read, first 100 lines)
-- Codebase analysis: `/Users/knakanishi/Repositories/FastCode/fastcode/llm_utils.py` (direct read)
-- Reference implementation: `/Users/knakanishi/Repositories/FastCode/nanobot/nanobot/providers/litellm_provider.py` (direct read) — HIGH confidence for litellm API shape
-- Project requirements: `/Users/knakanishi/Repositories/FastCode/.planning/PROJECT.md` (direct read)
-- litellm API shape (sync completion, streaming, VertexAI prefix, ADC, drop_params): HIGH confidence — corroborated by Nanobot reference implementation using `litellm>=1.0.0`
-- VertexAI env var names (`VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`): MEDIUM confidence — standard litellm VertexAI convention, unverified against current docs (WebFetch blocked during research)
-- tiktoken incompatibility with Gemini model names: HIGH confidence — tiktoken only knows OpenAI model names; `cl100k_base` fallback is a well-known workaround
+- uv 0.10.4 CLI: `uv help sync`, `uv help add`, `uv help lock`, `uv help export` — HIGH confidence (local execution)
+- https://docs.astral.sh/uv/guides/integration/docker/ — Docker layer caching pattern, `--no-install-project`, env vars — HIGH confidence
+- https://docs.astral.sh/uv/concepts/projects/dependencies/ — `[dependency-groups]` vs `[project.optional-dependencies]`, dev group behavior — HIGH confidence
+- https://docs.astral.sh/uv/concepts/projects/sync/ — `--frozen` vs `--locked` vs default semantics — HIGH confidence
+- https://docs.astral.sh/uv/concepts/projects/layout/ — required vs optional pyproject.toml sections — HIGH confidence
+- https://docs.astral.sh/uv/guides/projects/ — `uv add -r requirements.txt` migration path — HIGH confidence
+- `/Users/knakanishi/Repositories/FastCode/nanobot/pyproject.toml` — reference existing pyproject.toml in same repo (hatchling + `[project.optional-dependencies] dev`) — contrasted against FastCode's needs as an app vs library
+- `/Users/knakanishi/Repositories/FastCode/requirements.txt` — source of truth for current runtime + dev deps (35 packages total; pytest family identified as dev-only)
+- `/Users/knakanishi/Repositories/FastCode/Dockerfile` — current Docker pattern to be replaced
+
+---
+*Feature research for: uv packaging migration (requirements.txt → pyproject.toml + uv.lock)*
+*Researched: 2026-02-26*
