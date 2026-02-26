@@ -12,7 +12,7 @@ Requirements for the uv Migration & Tech Debt Cleanup milestone.
 - [x] **PKG-01**: Developer can install runtime deps and the fastcode package (editable) with `uv sync` from `pyproject.toml` + `uv.lock`; `pyproject.toml` includes `[build-system]` with hatchling so `fastcode` is importable as an installed package
 - [x] **PKG-02**: Dev/test deps (pytest, pytest-asyncio, pytest-cov) are isolated in `[dependency-groups] dev` and excluded from production installs via `UV_NO_DEV=1`
 - [x] **PKG-03**: `uv.lock` lockfile is committed to the repository; builds are reproducible across environments
-- [ ] **PKG-04**: `requirements.txt` is deleted; `pyproject.toml` + `uv.lock` are the single authoritative dependency files
+- [x] **PKG-04**: `requirements.txt` is deleted; `pyproject.toml` + `uv.lock` are the single authoritative dependency files
 - [ ] **PKG-05**: `Dockerfile` installs dependencies via `uv sync --frozen` with two-layer caching: layer 1 installs deps without project (`--no-install-project`), layer 2 installs the project itself
 - [ ] **PKG-06**: Docker builds exclude dev deps (`UV_NO_DEV=1`); production image has no pytest or test infrastructure
 - [ ] **PKG-07**: `ENV TOKENIZERS_PARALLELISM=false` removed from `Dockerfile` (dead env var after sentence-transformers removal in v1.1)
@@ -55,7 +55,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PKG-01 | Phase 8 | Complete |
 | PKG-02 | Phase 8 | Complete |
 | PKG-03 | Phase 8 | Complete |
-| PKG-04 | Phase 8 | Pending |
+| PKG-04 | Phase 8 | Complete |
 | PKG-05 | Phase 9 | Pending |
 | PKG-06 | Phase 9 | Pending |
 | PKG-07 | Phase 9 | Pending |

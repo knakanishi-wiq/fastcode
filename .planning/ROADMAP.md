@@ -35,7 +35,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 **Milestone Goal:** Replace requirements.txt + pip with pyproject.toml + uv.lock + uv Dockerfile; close four open tech debt items from v1.1; consolidate env var configuration.
 
-- [ ] **Phase 8: Package System Foundation** — Create pyproject.toml, generate uv.lock, delete requirements.txt (2 plans)
+- [x] **Phase 8: Package System Foundation** — Create pyproject.toml, generate uv.lock, delete requirements.txt (2 plans) (completed 2026-02-26)
 - [ ] **Phase 9: Dockerfile and Code Cleanup** — Update Dockerfile to use uv, remove dead code, make task_type explicit
 - [ ] **Phase 10: Config Consolidation and Verification** — Consolidate MODEL/LITELLM_MODEL env vars; verify CODE_RETRIEVAL_QUERY and streaming behavior live
 
@@ -88,6 +88,6 @@ Plans:
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
 | 6. Embedder Migration | v1.1 | 1/1 | Complete | 2026-02-25 |
 | 7. Dependency Cleanup and Smoke Test | v1.1 | 2/2 | Complete | 2026-02-25 |
-| 8. Package System Foundation | 1/2 | In Progress|  | - |
+| 8. Package System Foundation | 2/2 | Complete   | 2026-02-26 | - |
 | 9. Dockerfile and Code Cleanup | v1.2 | 0/? | Not started | - |
 | 10. Config Consolidation and Verification | v1.2 | 0/? | Not started | - |
