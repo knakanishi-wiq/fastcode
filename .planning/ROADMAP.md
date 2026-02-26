@@ -3,6 +3,7 @@
 ## Milestones
 
 - ✅ **v1.0 LiteLLM Provider Migration** — Phases 1–5 (shipped 2026-02-25)
+- ✅ **v1.1 VertexAI Embedding Migration** — Phases 6–7 (shipped 2026-02-25)
 
 ## Phases
 
@@ -19,6 +20,16 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 
 </details>
 
+<details>
+<summary>✅ v1.1 VertexAI Embedding Migration (Phases 6–7) — SHIPPED 2026-02-25</summary>
+
+- [x] Phase 6: Embedder Migration (1/1 plans) — completed 2026-02-25
+- [x] Phase 7: Dependency Cleanup and Smoke Test (2/2 plans) — completed 2026-02-25
+
+Full details: `.planning/milestones/v1.1-ROADMAP.md`
+
+</details>
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status   | Completed  |
@@ -28,3 +39,5 @@ Full details: `.planning/milestones/v1.0-ROADMAP.md`
 | 3. Non-Streaming Migration | v1.0 | 4/4 | Complete | 2026-02-24 |
 | 4. Streaming Migration and Finalization | v1.0 | 2/2 | Complete | 2026-02-25 |
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
+| 6. Embedder Migration | v1.1 | 1/1 | Complete | 2026-02-25 |
+| 7. Dependency Cleanup and Smoke Test | v1.1 | 2/2 | Complete | 2026-02-25 |

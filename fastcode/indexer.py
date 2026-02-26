@@ -366,7 +366,7 @@ class CodeIndexer:
             overview_text += f"\n\nREADME:\n{readme_content[:2000]}"  # Include truncated README
         
         # Generate embedding for the overview
-        embedding = self.embedder.embed_text(overview_text)
+        embedding = self.embedder.embed_text(overview_text, task_type="RETRIEVAL_DOCUMENT")
         
         # Prepare metadata
         metadata = {

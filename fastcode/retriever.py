@@ -730,8 +730,8 @@ class HybridRetriever:
         Semantic search using embeddings
         Uses filtered_vector_store if available, otherwise uses full vector_store
         """
-        # Embed query
-        query_embedding = self.embedder.embed_text(query)
+        # Embed query — CODE_RETRIEVAL_QUERY pairs with RETRIEVAL_DOCUMENT used at index time
+        query_embedding = self.embedder.embed_text(query, task_type="CODE_RETRIEVAL_QUERY")
         
         # Choose which vector store to use
         if self.filtered_vector_store is not None and self.filtered_vector_store.get_count() > 0:

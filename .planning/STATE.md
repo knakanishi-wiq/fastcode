@@ -4,15 +4,15 @@
 
 See: .planning/PROJECT.md (updated 2026-02-25)
 
-**Core value:** All LLM calls in FastCode route through litellm, enabling VertexAI on GCP without provider-specific client code.
-**Current focus:** Milestone v1.1 — VertexAI Embedding Migration
+**Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
+**Current focus:** Planning next milestone (`/gsd:new-milestone`)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-25 — Milestone v1.1 started
+Phase: milestone complete
+Plan: all complete
+Status: v1.1 VertexAI Embedding Migration shipped — 2 phases, 3 plans, 11/11 requirements satisfied
+Last activity: 2026-02-25 — v1.1 milestone completed and archived
 
 ## Performance Metrics
 
@@ -38,6 +38,9 @@ Last activity: 2026-02-25 — Milestone v1.1 started
 | Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
 | Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
 | Phase 05-fix-answer-generator-wiring-and-cleanup P01 | 3min | 2 tasks | 3 files |
+| Phase 06-embedder-migration P01 | 3min | 3 tasks | 3 files |
+| Phase 07-dependency-cleanup-and-smoke-test P01 | 2min | 2 tasks | 3 files |
+| Phase 07-dependency-cleanup-and-smoke-test P02 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -80,6 +83,14 @@ Recent decisions affecting current work:
 - [05-01]: MODEL fallback uses llm_client.DEFAULT_MODEL (not hardcoded string) — single source of truth for default model
 - [05-01]: openai and anthropic removed from requirements.txt — no fastcode/ file imports them post-Phase 4
 - [05-01]: .env.example MODEL updated from placeholder to vertex_ai/ prefix example; LITELLM_MODEL entry added
+- [Phase 06-01]: litellm.embedding() with task_type kwarg routes to VertexAI without provider-specific client code
+- [Phase 06-01]: embedding_dim=3072 read from config at init — no HTTP call at init time
+- [Phase 06-01]: embed_text() defaults task_type to RETRIEVAL_QUERY so retriever.py callers require zero changes
+- [Phase 06-01]: item["embedding"] dict-style access used (not item.embedding) for litellm version safety
+- [Phase 07-01]: R8+R10 committed atomically to prevent config-absent deploy window with missing sentence-transformers package
+- [Phase 07-01]: ENV TOKENIZERS_PARALLELISM=false left in Dockerfile — harmless no-op, out of R9 scope
+- [Phase 07-02]: load_dotenv() at module level means test runs live in dev (.env has VERTEXAI_PROJECT) and skips in CI (no .env) — consistent with test_vertexai_smoke.py pattern
+- [Phase 07-02]: CodeEmbedder imported inside test method to avoid import-time side effects in skipped environments
 
 ### Pending Todos
 
@@ -87,11 +98,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4]: `_stream_with_summary_filter()` chunk boundary behavior with litellm needs empirical testing — litellm chunk sizes may differ from Anthropic's granularity
-- [RESOLVED]: answer_generator.py was last file importing from deleted llm_utils — now migrated; runtime ImportError eliminated
+- [v1.1 tech debt]: `retriever.py` lines 415, 734 rely on `embed_text()` default `task_type`; explicit kwarg recommended
+- [v1.1 tech debt]: `fastcode/__init__.py` platform import block is dead code post sentence-transformers removal
+- [v1.0/v1.1 open]: `_stream_with_summary_filter()` chunk boundary behavior with litellm — needs live multi-turn session to test
 
 ## Session Continuity
 
 Last session: 2026-02-25
-Stopped at: Completed 05-01-PLAN.md — answer_generator.py fully wired to llm_client token counting; 6 count_tokens call sites fixed; MODEL=None risk eliminated; dead openai/anthropic deps removed; Phase 5 complete
+Stopped at: v1.1 milestone completed — all phases executed, verified (11/11 requirements), audited (tech_debt), and archived
 Resume file: None
