@@ -412,7 +412,7 @@ class HybridRetriever:
             semantic_query_text = query
 
         # Stage 1: Semantic search on repository overviews (use separate storage)
-        query_embedding = self.embedder.embed_text(semantic_query_text)
+        query_embedding = self.embedder.embed_text(semantic_query_text, task_type="RETRIEVAL_QUERY")
         semantic_results = self.vector_store.search_repository_overviews(
             query_embedding,
             k=top_k * 2,  # Get more candidates for combining
