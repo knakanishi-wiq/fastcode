@@ -3,15 +3,6 @@ FastCode 2.0 - Repository-Level Code Understanding System
 With Multi-Repository Support
 """
 
-import os
-import platform
-
-if platform.system() == 'Darwin':
-    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    os.environ['OMP_NUM_THREADS'] = '1'
-    os.environ['OPENBLAS_NUM_THREADS'] = '1'
-    os.environ['MKL_NUM_THREADS'] = '1'
-
 from .main import FastCode
 from .loader import RepositoryLoader
 from .parser import CodeParser
