@@ -15,10 +15,8 @@ from .iterative_agent import IterativeAgent
 from .agent_tools import AgentTools
 
 __version__ = "2.0.0"
-FastCode = FastCode
 
 __all__ = [
-    "FastCode",
     "FastCode",
     "RepositoryLoader",
     "CodeParser",
