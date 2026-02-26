@@ -65,7 +65,11 @@ Plans:
   2. Production Docker image has no pytest, pytest-asyncio, or pytest-cov installed (`pip show pytest` returns error inside container)
   3. `fastcode/__init__.py` contains no OS-detection or `TOKENIZERS_PARALLELISM` platform import block
   4. `retriever.py` line 415 passes `task_type="RETRIEVAL_QUERY"` as an explicit keyword argument
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Rewrite Dockerfile with uv two-layer cache pattern (PKG-05, PKG-06, PKG-07)
+- [ ] 09-02-PLAN.md — Remove dead platform block from __init__.py; explicit task_type in retriever.py (DEBT-01, DEBT-02)
 
 ### Phase 10: Config Consolidation and Verification
 **Goal**: A single env var controls the active model, and both CODE_RETRIEVAL_QUERY task_type and streaming chunk boundary behavior are verified live
