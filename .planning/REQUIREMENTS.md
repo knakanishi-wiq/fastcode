@@ -19,8 +19,8 @@ Requirements for the uv Migration & Tech Debt Cleanup milestone.
 
 ### Tech Debt (v1.1 cleanup)
 
-- [ ] **DEBT-01**: Dead platform import block removed from `fastcode/__init__.py` (OS-specific tokenizer env vars became no-ops after sentence-transformers removal)
-- [ ] **DEBT-02**: `retriever.py` line 415 passes `task_type="RETRIEVAL_QUERY"` explicitly instead of relying on the `embed_text()` default; intent visible at call site
+- [x] **DEBT-01**: Dead platform import block removed from `fastcode/__init__.py` (OS-specific tokenizer env vars became no-ops after sentence-transformers removal)
+- [x] **DEBT-02**: `retriever.py` line 415 passes `task_type="RETRIEVAL_QUERY"` explicitly instead of relying on the `embed_text()` default; intent visible at call site
 - [ ] **DEBT-03**: `retriever.py` line 734 `CODE_RETRIEVAL_QUERY` confirmed valid for `gemini-embedding-001` via live smoke test; verified the asymmetric CODE_RETRIEVAL_QUERY (query) / RETRIEVAL_DOCUMENT (index) pairing works end-to-end
 - [ ] **DEBT-04**: `MODEL` and `LITELLM_MODEL` env vars consolidated into one; `.env.example` and `answer_generator.py` updated to use a single var; breaking change documented
 - [ ] **DEBT-05**: `_stream_with_summary_filter()` chunk boundary behavior verified in a live multi-turn session; result captured as a test note or smoke test
@@ -59,8 +59,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PKG-05 | Phase 9 | Complete |
 | PKG-06 | Phase 9 | Complete |
 | PKG-07 | Phase 9 | Complete |
-| DEBT-01 | Phase 9 | Pending |
-| DEBT-02 | Phase 9 | Pending |
+| DEBT-01 | Phase 9 | Complete |
+| DEBT-02 | Phase 9 | Complete |
 | DEBT-03 | Phase 10 | Pending |
 | DEBT-04 | Phase 10 | Pending |
 | DEBT-05 | Phase 10 | Pending |
