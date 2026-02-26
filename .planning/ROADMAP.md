@@ -35,7 +35,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 
 **Milestone Goal:** Replace requirements.txt + pip with pyproject.toml + uv.lock + uv Dockerfile; close four open tech debt items from v1.1; consolidate env var configuration.
 
-- [ ] **Phase 8: Package System Foundation** — Create pyproject.toml, generate uv.lock, delete requirements.txt
+- [ ] **Phase 8: Package System Foundation** — Create pyproject.toml, generate uv.lock, delete requirements.txt (2 plans)
 - [ ] **Phase 9: Dockerfile and Code Cleanup** — Update Dockerfile to use uv, remove dead code, make task_type explicit
 - [ ] **Phase 10: Config Consolidation and Verification** — Consolidate MODEL/LITELLM_MODEL env vars; verify CODE_RETRIEVAL_QUERY and streaming behavior live
 
@@ -50,7 +50,11 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
   2. `uv sync --no-dev && python -m pytest` fails with ImportError (pytest not present in runtime install)
   3. `git ls-files uv.lock` returns the file path (lockfile is committed, not gitignored)
   4. `requirements.txt` no longer exists in the repository
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Author pyproject.toml + generate uv.lock (PKG-01, PKG-02, PKG-03)
+- [ ] 08-02-PLAN.md — Delete requirements.txt + run phase verification (PKG-04)
 
 ### Phase 9: Dockerfile and Code Cleanup
 **Goal**: Docker builds use uv with layer caching, dead code is removed, and task_type intent is visible at all call sites
@@ -84,6 +88,6 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 | 5. Fix answer_generator.py Wiring | v1.0 | 1/1 | Complete | 2026-02-25 |
 | 6. Embedder Migration | v1.1 | 1/1 | Complete | 2026-02-25 |
 | 7. Dependency Cleanup and Smoke Test | v1.1 | 2/2 | Complete | 2026-02-25 |
-| 8. Package System Foundation | v1.2 | 0/? | Not started | - |
+| 8. Package System Foundation | v1.2 | 0/2 | Not started | - |
 | 9. Dockerfile and Code Cleanup | v1.2 | 0/? | Not started | - |
 | 10. Config Consolidation and Verification | v1.2 | 0/? | Not started | - |
