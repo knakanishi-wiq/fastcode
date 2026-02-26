@@ -38,7 +38,7 @@ class AnswerGenerator:
         # Load environment variables from .env file
         load_dotenv()
 
-        self.model = os.getenv("MODEL") or llm_client.DEFAULT_MODEL
+        self.model = llm_client.DEFAULT_MODEL
 
     def generate(self, query: str, retrieved_elements: List[Dict[str, Any]], 
                  query_info: Optional[Dict[str, Any]] = None,
