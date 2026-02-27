@@ -76,7 +76,10 @@ Plans:
   2. After indexing a repository, the `sources` table contains one row per indexed file with `path`, `content_hash`, `mtime_ns`, and `size` populated
   3. Re-indexing a repository where no files have changed produces zero new chunk writes (confirmed by row count staying the same)
   4. Re-indexing after modifying one file updates only that file's chunks and source record; other files' rows are untouched
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 12-01-PLAN.md — Implement index_repo() with SQLite chunk writing and mtime+hash change detection (TDD)
 
 ### Phase 13: BM25 Retriever Swap
 **Goal**: `HybridRetriever` performs BM25 search via FTS5; pkl files are never written or read
@@ -115,6 +118,6 @@ Plans:
 | 9. Dockerfile and Code Cleanup | v1.2 | 2/2 | Complete | 2026-02-26 |
 | 10. Config Consolidation and Verification | v1.2 | 2/2 | Complete | 2026-02-26 |
 | 11. SQLite Schema and DB Init | 1/1 | Complete    | 2026-02-27 | — |
-| 12. Indexer Integration | v1.3 | 0/? | Not started | — |
+| 12. Indexer Integration | v1.3 | 0/1 | Not started | — |
 | 13. BM25 Retriever Swap | v1.3 | 0/? | Not started | — |
 | 14. Embedding Cache Migration | v1.3 | 0/? | Not started | — |
