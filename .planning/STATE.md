@@ -5,15 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** Planning next milestone
+**Current focus:** v1.3 — SQLite FTS5 BM25 Migration
 
 ## Current Position
 
-Milestone: v1.2 — uv Migration & Tech Debt Cleanup — SHIPPED 2026-02-27
-Status: All phases complete; milestone archived
-Last activity: 2026-02-27 — v1.2 milestone completed and tagged
-
-Progress: [██████████] 100% (v1.0 + v1.1 + v1.2 complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-27 — Milestone v1.3 started
 
 ## Performance Metrics
 

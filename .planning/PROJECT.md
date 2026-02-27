@@ -41,7 +41,14 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 
 ### Active
 
-<!-- Next milestone requirements go here -->
+<!-- v1.3: SQLite FTS5 BM25 Migration -->
+
+- [ ] Replace `rank_bm25` (BM25Okapi, in-memory) with SQLite FTS5 virtual table as the BM25 backend
+- [ ] Persist chunk corpus in a SQLite `chunks` table (replaces pkl serialization)
+- [ ] Trigger-maintained FTS5 index kept in sync with `chunks` on insert/delete/update
+- [ ] Migrate embedding cache from DiskCache to a SQLite `embedding_cache` table (keyed on content hash + model)
+- [ ] `HybridRetriever` BM25 path calls FTS5 instead of `rank_bm25`; FAISS path unchanged
+- [ ] Existing FAISS index files remain; SQLite DB stored alongside in `./data/`
 
 ### Out of Scope
 
@@ -104,5 +111,15 @@ All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python
 | PEP 735 `[dependency-groups]` for dev isolation | Alternative to `[project.optional-dependencies]`; uv-native; excludable with `UV_NO_DEV=1` | ✓ Good — clean separation; production image verified pytest-free |
 | Remove `MODEL` env var entirely (not alias/deprecate) | Aliasing preserves the confusion; clean break with migration note is clearer | ✓ Good — `.env.example` migration note documents the change for upgraders |
 
+## Current Milestone: v1.3 SQLite FTS5 BM25 Migration
+
+**Goal:** Replace the in-memory rank_bm25/pkl BM25 backend with SQLite FTS5, and migrate the embedding cache to SQLite, while keeping FAISS for vector search.
+
+**Target features:**
+- SQLite FTS5 virtual table as BM25 backend (disk-backed, incremental, trigger-maintained)
+- `chunks` table in SQLite replaces pkl serialization of the BM25 corpus
+- `embedding_cache` table in SQLite replaces DiskCache for embeddings
+- FAISS vector index unchanged
+
 ---
-*Last updated: 2026-02-27 after v1.2 milestone*
+*Last updated: 2026-02-27 after v1.3 milestone start*
