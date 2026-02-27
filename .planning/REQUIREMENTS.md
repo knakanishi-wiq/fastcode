@@ -7,9 +7,9 @@
 
 ### Storage Layer
 
-- [ ] **STOR-01**: System stores chunked content in a SQLite `chunks` table with fields: `id`, `source_path`, `content`, `content_hash`, `chunk_index`, `start_offset`, `end_offset`
-- [ ] **STOR-02**: System tracks indexed file state in a SQLite `sources` table with `path`, `content_hash`, `mtime_ns`, `size` for change detection
-- [ ] **STOR-03**: A `chunks_fts` FTS5 virtual table is content-synced to `chunks` and maintained by SQL triggers on insert, update, and delete
+- [x] **STOR-01**: System stores chunked content in a SQLite `chunks` table with fields: `id`, `source_path`, `content`, `content_hash`, `chunk_index`, `start_offset`, `end_offset`
+- [x] **STOR-02**: System tracks indexed file state in a SQLite `sources` table with `path`, `content_hash`, `mtime_ns`, `size` for change detection
+- [x] **STOR-03**: A `chunks_fts` FTS5 virtual table is content-synced to `chunks` and maintained by SQL triggers on insert, update, and delete
 
 ### BM25 Retrieval
 
@@ -50,9 +50,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STOR-01 | Phase 11 | Pending |
-| STOR-02 | Phase 11 | Pending |
-| STOR-03 | Phase 11 | Pending |
+| STOR-01 | Phase 11 | Complete |
+| STOR-02 | Phase 11 | Complete |
+| STOR-03 | Phase 11 | Complete |
 | BM25-01 | Phase 13 | Pending |
 | BM25-02 | Phase 13 | Pending |
 | BM25-03 | Phase 13 | Pending |

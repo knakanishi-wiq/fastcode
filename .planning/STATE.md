@@ -5,18 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 11: SQLite Schema and DB Init)
+**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 12: Indexer SQLite Integration)
 
 ## Current Position
 
 Phase: 11 — SQLite Schema and DB Init
-Plan: —
-Status: Not started
-Last activity: 2026-02-27 — v1.3 roadmap created; ready to begin Phase 11
+Plan: 01 (Complete)
+Status: Phase 11 complete — ready for Phase 12
+Last activity: 2026-02-27 — Phase 11 Plan 01 complete; fastcode/db.py and tests/test_db.py created
 
 ```
-Progress: Phases 1–10 complete ████████████████████░░░░░░░░░ 71% (10/14)
-v1.3:     Phase 11 ░░░░ Phase 12 ░░░░ Phase 13 ░░░░ Phase 14 ░░░░
+Progress: Phases 1–11 complete █████████████████████░░░░░░░░ 79% (11/14)
+v1.3:     Phase 11 ████ Phase 12 ░░░░ Phase 13 ░░░░ Phase 14 ░░░░
 ```
 
 ## Performance Metrics
@@ -43,6 +43,7 @@ v1.3:     Phase 11 ░░░░ Phase 12 ░░░░ Phase 13 ░░░░ Phas
 - Trend: Stable
 
 *Updated after each plan completion*
+| Phase 11-sqlite-schema-and-db-init P01 | 2 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,9 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [09-02]: Use uppercase RETRIEVAL_QUERY in retriever.py task_type kwarg — matches embedder.py default exactly to avoid runtime validation error
 - [Phase 10-02]: DEBT-03 confirmed live: gemini-embedding-001 accepts CODE_RETRIEVAL_QUERY task_type — asymmetric pairing at retriever.py line 734 is valid
 - [Phase 10-02]: DEBT-05 confirmed live: _stream_with_summary_filter() correctly suppresses SUMMARY tags — no leakage observed
+- [Phase 11-sqlite-schema-and-db-init]: Used executescript() for all DDL — cleaner single call vs N individual execute() calls
+- [Phase 11-sqlite-schema-and-db-init]: FTS5 content=chunks (content-linked) over contentless — Phase 13 retriever can get chunk text from FTS without extra join
+- [Phase 11-sqlite-schema-and-db-init]: WAL mode omitted — single-process CLI tool; no concurrent readers
 
 ### v1.3 Context
 
@@ -73,9 +77,12 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - `fastcode/embedder.py` — `CodeEmbedder` calls `litellm.embedding()`; uses DiskCache for embedding caching
 - `fastcode/vector_store.py` — manages FAISS index; FAISS stays unchanged in v1.3
 
+**Architecture decisions resolved (Phase 11):**
+- DB init location: `fastcode/db.py` module (resolved)
+- FTS5 content-linked table (content=chunks) chosen for retriever convenience
+
 **Architecture decisions pending:**
-- SQLite DB file path: likely `./data/{repo_name}.db` or a single `./data/fastcode.db`
-- DB init location: new `fastcode/db.py` module or added to `indexer.py`
+- SQLite DB file path: likely `./data/{repo_name}.db` or a single `./data/fastcode.db` (Phase 12)
 - EMB-01/EMB-02 (Phase 14) depends on Phase 11 schema but is independent of Phases 12-13
 
 ### Pending Todos
@@ -89,5 +96,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: v1.3 roadmap created (Phases 11–14 defined); Phase 11 planning not yet started
+Stopped at: Completed 11-01-PLAN.md — fastcode/db.py (init_db), tests/test_db.py (7 tests), STOR-01/02/03 done
 Resume file: None
