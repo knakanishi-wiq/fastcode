@@ -2,7 +2,7 @@
 
 ## What This Is
 
-FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely.
+FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely. v1.2 modernized the packaging system (pyproject.toml + uv.lock + uv Dockerfile) and closed all remaining v1.1 tech debt: dead code removed, task_type explicit at all call sites, env var config unified, and live smoke tests confirmed API behavior.
 
 ## Core Value
 
@@ -30,19 +30,18 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 - ✓ Pass `task_type=RETRIEVAL_DOCUMENT` when indexing, `task_type=RETRIEVAL_QUERY` when embedding queries — v1.1
 - ✓ Remove `sentence-transformers` and `torch` from `requirements.txt` and `Dockerfile` — v1.1
 - ✓ ADC embedding smoke test (skips in CI, verifies shape/normalization live) — v1.1
+- ✓ Migrate `requirements.txt` → `pyproject.toml` with project metadata and dependencies — v1.2
+- ✓ Generate and commit `uv.lock` lockfile; builds reproducible across environments — v1.2
+- ✓ Separate dev/test deps (`[dependency-groups] dev`) from runtime; excluded via `UV_NO_DEV=1` — v1.2
+- ✓ Update `Dockerfile` to install via `uv sync --locked` with two-layer cache pattern — v1.2
+- ✓ Remove dead platform import block from `fastcode/__init__.py` — v1.2
+- ✓ Make `task_type` explicit at `retriever.py` call sites (lines 415, 734) — v1.2
+- ✓ Consolidate `MODEL`/`LITELLM_MODEL` env vars into one (`LITELLM_MODEL` only) — v1.2
+- ✓ Verify `_stream_with_summary_filter()` chunk boundary behavior in live multi-turn session — v1.2
 
 ### Active
 
-<!-- v1.2 uv Migration & Tech Debt Cleanup -->
-
-- [ ] Migrate `requirements.txt` → `pyproject.toml` with project metadata and dependencies
-- [ ] Generate `uv.lock` lockfile
-- [ ] Separate dev/test extras from runtime dependencies
-- [ ] Update `Dockerfile` to install via `uv` instead of `pip`
-- [ ] Remove dead platform import block from `fastcode/__init__.py`
-- [ ] Make `task_type` explicit at `retriever.py` call sites (lines 415, 734)
-- [ ] Consolidate `MODEL` and `LITELLM_MODEL` env vars into one
-- [ ] Test `_stream_with_summary_filter()` chunk boundary behavior in live multi-turn session
+<!-- Next milestone requirements go here -->
 
 ### Out of Scope
 
@@ -52,24 +51,29 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 - Multiple simultaneous providers — one active provider at a time is sufficient
 - Offline mode — real-time generation is core
 - Gemini-native tokenizer in `truncate_to_tokens` — litellm token_counter used for count accuracy; tiktoken cl100k_base used for encode/decode truncation (close enough for context window management)
+- `src/` layout migration — no structural benefit for this app; editable install achieves same path-independence
+- CI workflow (GitHub Actions) — no existing CI; separate milestone concern (PKG-F01)
+- Publishing to PyPI — FastCode is an internal tool; installable for local editable install only
+- Upstream HKUDS/FastCode sync — separate concern; changes would create significant merge conflicts
 
 ## Context
 
-All LLM and embedding calls route through litellm. Package is ~55,300 LOC Python. v1.1 shipped 2026-02-25 — both phases complete, 11/11 requirements satisfied, smoke test passed live against VertexAI ADC.
+All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python.
 
-**Shipped v1.1 (Phases 6–7):** `fastcode/embedder.py` rewritten, `sentence-transformers`/`torch` removed from all dependency manifests, `tests/test_embedder_smoke.py` live-verified (shape `(3072,)`, L2 norm 1.0, `gemini-embedding-001`).
+**v1.2 shipped 2026-02-27 (Phases 8–10):**
+- `pyproject.toml` + `uv.lock` (160 packages, hatchling editable install); `requirements.txt` deleted
+- Dockerfile rewritten with uv two-layer cache; `UV_NO_DEV=1` excludes pytest from production image
+- Dead `__init__.py` platform block removed; `task_type` explicit at `retriever.py:415` and `:734`
+- `MODEL` env var removed; all 5 LLM callers uniformly read `llm_client.DEFAULT_MODEL` (sourced from `LITELLM_MODEL`)
+- Live smoke tests confirm: CODE_RETRIEVAL_QUERY valid for gemini-embedding-001; streaming filter passes no SUMMARY tag leakage
 
-**Remaining tech debt (v1.1):**
-- `fastcode/__init__.py` platform import block — dead code post sentence-transformers removal; tracked in `deferred-items.md`
-- `retriever.py` lines 415, 734 rely on `embed_text()` default `task_type` — correct at runtime, but intent invisible at call site
-- Streaming UI token-by-token observation (requires live browser session)
-- `_stream_with_summary_filter()` SUMMARY tag chunk boundary behavior (requires live multi-turn session)
+**Install:** `uv sync` (runtime) or `uv sync --no-dev` (production equivalent)
 
-**Known consequence:** Existing FAISS indexes are incompatible (dimension 384 → 3072); delete `./data/vector_store/` before first use after upgrade.
+**Known consequence:** Existing FAISS indexes are incompatible (dimension 384 → 3072 since v1.1); delete `./data/vector_store/` before first use after upgrade.
 
 ## Constraints
 
-- **Backward compatibility**: Existing config.yaml and .env patterns still work — only env var names changed (`MODEL`, `LITELLM_MODEL` instead of OpenAI API key)
+- **Backward compatibility**: Existing config.yaml patterns still work; `.env` users must rename `MODEL` → `LITELLM_MODEL` (v1.2 breaking change, documented with migration note)
 - **Streaming**: `answer_generator.py` streaming preserved via `litellm.completion_stream()` + `choices[0].delta.content` chunk format
 - **Docker**: Container deployment works with ADC (mount `~/.config/gcloud` or use workload identity)
 - **No new embedding dependencies**: sentence-transformers/torch removed; litellm (already present) handles all embedding calls
@@ -88,24 +92,17 @@ All LLM and embedding calls route through litellm. Package is ~55,300 LOC Python
 | Delete `llm_utils.py` with callers present | Forces clean migration; `litellm.drop_params=True` supersedes its max_tokens fallback | ✓ Good — no dead stubs; app was intentionally broken until Phase 3/4 |
 | `vertex_ai/` prefix in model strings (not `gemini/`) | `gemini/` routes to Google AI Studio, not VertexAI — ADC auth only applies to `vertex_ai/` | ✓ Good — documented in .env.example; prevents silent auth path mismatch |
 | Smoke test skips when `VERTEXAI_PROJECT` unset | CI without GCP credentials stays green | ✓ Good — no CI breakage; broad keyword matching avoids litellm version-specific error text |
-| `MODEL` and `LITELLM_MODEL` as independent env vars | `answer_generator.py` has pre-existing `MODEL` var; other callers use `LITELLM_MODEL` via DEFAULT_MODEL | ⚠ Revisit — operational confusion risk; documented in .env.example but independence not obvious |
+| ~~`MODEL` and `LITELLM_MODEL` as independent env vars~~ | Pre-v1.2: `answer_generator.py` had its own `MODEL` var; other callers used `LITELLM_MODEL` | ✓ Resolved in v1.2 — `MODEL` removed; all 5 LLM callers now read `llm_client.DEFAULT_MODEL` |
 | `litellm.num_retries = 3` global | Transient VertexAI errors auto-retried without per-call config | ✓ Good — set alongside other globals in llm_client.py |
 | `litellm.embedding()` with `task_type` kwarg for VertexAI routing | Avoids provider-specific client; same litellm pattern as LLM calls | ✓ Good — R1-R7 all satisfied; smoke test live-confirmed |
 | `embedding_dim=3072` read from config at init (no cold-start API call) | FAISS index needs dimension at construction; cold-start call would block init | ✓ Good — CodeEmbedder.__init__() makes zero HTTP calls; dimension hardened via config |
 | R8+R10 committed atomically (requirements.txt + main.py default together) | If requirements.txt loses sentence-transformers before main.py is updated, config-absent deploy hits litellm.BadRequestError (not ImportError) | ✓ Good — atomic commit closes the deploy breakage window |
-| `embed_text()` default `task_type="RETRIEVAL_QUERY"` — retriever.py callers require zero changes | Backwards-compatible addition; intent is visible in embedder.py signature | ⚠ Revisit — retriever.py call sites (lines 415, 734) don't forward task_type explicitly; latent fragility if default changes |
-| `ENV TOKENIZERS_PARALLELISM=false` left in Dockerfile | Harmless no-op after sentence-transformers removal; R9 spec excluded it | ✓ Good — no harm; can be removed in a future cleanup |
-
-## Current Milestone: v1.2 uv Migration & Tech Debt Cleanup
-
-**Goal:** Modernize packaging with uv (pyproject.toml + lockfile + Dockerfile) and close the four open tech debt items from v1.1.
-
-**Target features:**
-- Full uv migration (pyproject.toml, uv.lock, Dockerfile, dev/test extras)
-- Remove dead `__init__.py` platform import block
-- Explicit `task_type` at `retriever.py` call sites
-- Consolidate `MODEL`/`LITELLM_MODEL` env vars into one
-- Streaming smoke test for `_stream_with_summary_filter()`
+| ~~`embed_text()` default `task_type="RETRIEVAL_QUERY"` — retriever.py callers require zero changes~~ | Backwards-compatible addition; intent was invisible at call site | ✓ Resolved in v1.2 — retriever.py lines 415 and 734 now pass task_type explicitly |
+| `ENV TOKENIZERS_PARALLELISM=false` left in Dockerfile | Harmless no-op after sentence-transformers removal | ✓ Resolved in v1.2 — removed (DEBT-07) |
+| `pyproject.toml` + hatchling over setuptools | hatchling auto-discovers `fastcode/` at repo root; no `[tool.hatch.build]` config needed | ✓ Good — zero extra config; editable install works out of the box |
+| `uv sync --locked` in Dockerfile (not `--frozen`) | `--locked` errors if lockfile is out of date; `--frozen` silently uses whatever is on disk | ✓ Good — stricter reproducibility; catches drift between pyproject.toml and uv.lock |
+| PEP 735 `[dependency-groups]` for dev isolation | Alternative to `[project.optional-dependencies]`; uv-native; excludable with `UV_NO_DEV=1` | ✓ Good — clean separation; production image verified pytest-free |
+| Remove `MODEL` env var entirely (not alias/deprecate) | Aliasing preserves the confusion; clean break with migration note is clearer | ✓ Good — `.env.example` migration note documents the change for upgraders |
 
 ---
-*Last updated: 2026-02-26 after v1.2 milestone started*
+*Last updated: 2026-02-27 after v1.2 milestone*

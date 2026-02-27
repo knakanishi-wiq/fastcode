@@ -2,19 +2,18 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-26)
+See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** Phase 10 — Config Consolidation and Verification (v1.2)
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 10 of 10 (v1.2 — Config Consolidation and Verification)
-Plan: 2 of 3 in current phase
-Status: Plan 02 complete
-Last activity: 2026-02-26 — Phase 10 Plan 02 complete (DEBT-03 and DEBT-05 resolved; live smoke tests verified against GCP)
+Milestone: v1.2 — uv Migration & Tech Debt Cleanup — SHIPPED 2026-02-27
+Status: All phases complete; milestone archived
+Last activity: 2026-02-27 — v1.2 milestone completed and tagged
 
-Progress: [█████████░] 95% (v1.0 + v1.1 complete; v1.2 Phases 8-10 Plans 01-02 complete)
+Progress: [██████████] 100% (v1.0 + v1.1 + v1.2 complete)
 
 ## Performance Metrics
 
