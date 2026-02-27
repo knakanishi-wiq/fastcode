@@ -50,22 +50,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STOR-01 | — | Pending |
-| STOR-02 | — | Pending |
-| STOR-03 | — | Pending |
-| BM25-01 | — | Pending |
-| BM25-02 | — | Pending |
-| BM25-03 | — | Pending |
-| IDX-01 | — | Pending |
-| IDX-02 | — | Pending |
-| EMB-01 | — | Pending |
-| EMB-02 | — | Pending |
+| STOR-01 | Phase 11 | Pending |
+| STOR-02 | Phase 11 | Pending |
+| STOR-03 | Phase 11 | Pending |
+| BM25-01 | Phase 13 | Pending |
+| BM25-02 | Phase 13 | Pending |
+| BM25-03 | Phase 13 | Pending |
+| IDX-01 | Phase 12 | Pending |
+| IDX-02 | Phase 12 | Pending |
+| EMB-01 | Phase 14 | Pending |
+| EMB-02 | Phase 14 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-02-27*
-*Last updated: 2026-02-27 after initial definition*
+*Last updated: 2026-02-27 — traceability updated after roadmap creation*

@@ -5,19 +5,24 @@
 See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** v1.3 — SQLite FTS5 BM25 Migration
+**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 11: SQLite Schema and DB Init)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 11 — SQLite Schema and DB Init
 Plan: —
-Status: Defining requirements
-Last activity: 2026-02-27 — Milestone v1.3 started
+Status: Not started
+Last activity: 2026-02-27 — v1.3 roadmap created; ready to begin Phase 11
+
+```
+Progress: Phases 1–10 complete ████████████████████░░░░░░░░░ 71% (10/14)
+v1.3:     Phase 11 ░░░░ Phase 12 ░░░░ Phase 13 ░░░░ Phase 14 ░░░░
+```
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16 (v1.0: 10 plans, v1.1: 3 plans, v1.2: 3 plans so far)
+- Total plans completed: 16 (v1.0: 10 plans, v1.1: 3 plans, v1.2: 3 plans)
 - Average duration: ~2–3 min/plan
 - Total execution time: ~0.6 hours
 
@@ -60,16 +65,29 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [Phase 10-02]: DEBT-03 confirmed live: gemini-embedding-001 accepts CODE_RETRIEVAL_QUERY task_type — asymmetric pairing at retriever.py line 734 is valid
 - [Phase 10-02]: DEBT-05 confirmed live: _stream_with_summary_filter() correctly suppresses SUMMARY tags — no leakage observed
 
+### v1.3 Context
+
+**Key files for this milestone:**
+- `fastcode/retriever.py` — `HybridRetriever.full_bm25()` uses `rank_bm25.BM25Okapi`; pkl at `./data/{repo_name}_bm25.pkl`
+- `fastcode/indexer.py` — builds BM25 index (pkl) and FAISS index during indexing
+- `fastcode/embedder.py` — `CodeEmbedder` calls `litellm.embedding()`; uses DiskCache for embedding caching
+- `fastcode/vector_store.py` — manages FAISS index; FAISS stays unchanged in v1.3
+
+**Architecture decisions pending:**
+- SQLite DB file path: likely `./data/{repo_name}.db` or a single `./data/fastcode.db`
+- DB init location: new `fastcode/db.py` module or added to `indexer.py`
+- EMB-01/EMB-02 (Phase 14) depends on Phase 11 schema but is independent of Phases 12-13
+
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-- [Phase 10 — RESOLVED]: DEBT-03 and DEBT-05 required live GCP credentials — both verified successfully via .env ADC on 2026-02-26
+None.
 
 ## Session Continuity
 
-Last session: 2026-02-26
-Stopped at: Completed 10-02-PLAN.md (DEBT-03 and DEBT-05 resolved; live smoke tests added and verified against GCP)
+Last session: 2026-02-27
+Stopped at: v1.3 roadmap created (Phases 11–14 defined); Phase 11 planning not yet started
 Resume file: None
