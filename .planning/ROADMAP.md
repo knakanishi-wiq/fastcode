@@ -45,7 +45,7 @@ Full details: `.planning/milestones/v1.2-ROADMAP.md`
 
 ### v1.3 SQLite FTS5 BM25 Migration (Phases 11–14)
 
-- [ ] **Phase 11: SQLite Schema and DB Init** — Database foundation: chunks, sources, and FTS5 tables
+- [ ] **Phase 11: SQLite Schema and DB Init** — Database foundation: chunks, sources, and FTS5 tables *(1 plan)*
 - [ ] **Phase 12: Indexer Integration** — Write chunks to SQLite during indexing; skip unchanged files
 - [ ] **Phase 13: BM25 Retriever Swap** — HybridRetriever queries FTS5; pkl files eliminated
 - [ ] **Phase 14: Embedding Cache Migration** — SQLite embedding_cache replaces DiskCache
@@ -62,7 +62,10 @@ Full details: `.planning/milestones/v1.2-ROADMAP.md`
   3. A `chunks_fts` FTS5 virtual table exists and is content-linked to `chunks`
   4. SQL triggers on `chunks` (insert, update, delete) automatically keep `chunks_fts` in sync — verified by inserting a row and querying `chunks_fts MATCH` to find it
   5. DB init is idempotent: running it twice on an existing database raises no errors and does not corrupt data
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md — Create fastcode/db.py with SQLite schema (chunks, sources, chunks_fts) and automated tests
 
 ### Phase 12: Indexer Integration
 **Goal**: Repository indexing writes all chunks to the SQLite `chunks` table and skips unchanged files using content hash comparison
