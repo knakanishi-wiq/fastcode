@@ -148,7 +148,7 @@ git clone https://github.com/HKUDS/FastCode.git
 cd FastCode
 
 # 2. Install dependencies
-pip install -r requirements.txt
+uv sync
 
 # 3. Configure your API keys
 cp env.example .env
@@ -185,21 +185,8 @@ FastCode supports **Linux**, **macOS**, and **Windows**. Choose your platform be
 
 2. **Install Dependencies**
 
-   **Option A: Using uv (Recommended)**
    ```bash
-   # Install uv
-   pip install uv
-   # create new env with uv
-   uv venv --python=3.12
-   source .venv/bin/activate
-
-   # Install dependencies with uv
-   uv pip install -r requirements.txt
-   ```
-
-   **Option B: Using pip**
-   ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 3. **Configure Environment**
@@ -243,21 +230,8 @@ FastCode supports **Linux**, **macOS**, and **Windows**. Choose your platform be
 
 2. **Install Dependencies**
 
-   **Option A: Using uv (Recommended)**
    ```bash
-   # Install uv
-   pip install uv
-   # create new env with uv
-   uv venv --python=3.12
-   source .venv/bin/activate
-
-   # Install dependencies with uv
-   uv pip install -r requirements.txt
-   ```
-
-   **Option B: Using pip**
-   ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 3. **Configure Environment**
@@ -303,21 +277,8 @@ FastCode supports **Linux**, **macOS**, and **Windows**. Choose your platform be
 
 2. **Install Dependencies**
 
-   **Option A: Using uv (Recommended)**
    ```cmd
-   # Install uv
-   pip install uv
-   # create new env with uv
-   uv venv --python=3.12
-   .venv\Scripts\activate
-
-   # Install dependencies with uv
-   uv pip install -r requirements.txt
-   ```
-
-   **Option B: Using pip**
-   ```cmd
-   pip install -r requirements.txt
+   uv sync
    ```
 
 3. **Configure Environment**
@@ -562,9 +523,7 @@ Before configuring MCP, make sure FastCode dependencies are installed in the loc
 ```bash
 git clone https://github.com/HKUDS/FastCode.git
 cd FastCode
-uv venv --python=3.12
-source .venv/bin/activate
-uv pip install -r requirements.txt
+uv sync
 ```
 
 The MCP server should be launched with `.venv/bin/python`, and it needs `OPENAI_API_KEY`, `MODEL`, and `BASE_URL`.
@@ -978,9 +937,7 @@ We welcome contributions! FastCode is built for the community, by the community.
 # Clone and setup
 git clone https://github.com/HKUDS/FastCode.git
 cd FastCode
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
+uv sync
 
 # Run tests
 pytest tests/

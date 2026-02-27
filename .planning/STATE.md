@@ -2,95 +2,64 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-25)
+See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** Planning next milestone (`/gsd:new-milestone`)
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: milestone complete
-Plan: all complete
-Status: v1.1 VertexAI Embedding Migration shipped — 2 phases, 3 plans, 11/11 requirements satisfied
-Last activity: 2026-02-25 — v1.1 milestone completed and archived
+Milestone: v1.2 — uv Migration & Tech Debt Cleanup — SHIPPED 2026-02-27
+Status: All phases complete; milestone archived
+Last activity: 2026-02-27 — v1.2 milestone completed and tagged
+
+Progress: [██████████] 100% (v1.0 + v1.1 + v1.2 complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 5min
-- Total execution time: 0.2 hours
+- Total plans completed: 16 (v1.0: 10 plans, v1.1: 3 plans, v1.2: 3 plans so far)
+- Average duration: ~2–3 min/plan
+- Total execution time: ~0.6 hours
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-config-and-dependencies | 1 | 6min | 6min |
-| 02-core-infrastructure | 2 | 6min | 3min |
-| 03-non-streaming-migration | 4 | 8min | 2min |
+| Phase | Plans | Avg/Plan |
+|-------|-------|----------|
+| 01–05 (v1.0) | 10 | ~2 min |
+| 06–07 (v1.1) | 3 | ~2 min |
+| 08 (v1.2) | 2 | 2 min |
+| 09-01 (v1.2) | 1 | ~3 min |
+| 09-02 (v1.2) | 1 | 3 min |
+| 10-01 (v1.2) | 1 | 2 min |
+| 10-02 (v1.2) | 1 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (2min), 03-01 (2min), 03-02 (2min), 03-03 (2min), 03-04 (2min)
-- Trend: Faster
+- Last 5 plans: 2min, 3min, 2min, 3min, 3min
+- Trend: Stable
 
 *Updated after each plan completion*
-| Phase 03-non-streaming-migration P04 | 2min | 2 tasks | 1 files |
-| Phase 04-streaming-migration P02 | 2min | 2 tasks | 2 files |
-| Phase 04-streaming-migration P01 | 3min | 2 tasks | 1 files |
-| Phase 05-fix-answer-generator-wiring-and-cleanup P01 | 3min | 2 tasks | 3 files |
-| Phase 06-embedder-migration P01 | 3min | 3 tasks | 3 files |
-| Phase 07-dependency-cleanup-and-smoke-test P01 | 2min | 2 tasks | 3 files |
-| Phase 07-dependency-cleanup-and-smoke-test P02 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
+Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 
-- [Setup]: Replace direct clients (not wrap) — cleaner single path
-- [Setup]: Use litellm (not custom abstraction) — battle-tested, already in Nanobot
-- [Setup]: ADC for auth (not service account JSON) — standard GCP pattern
-- [01-01]: Use vertex_ai/ prefix in litellm model strings (not gemini/) to route through VertexAI with ADC
-- [01-01]: Smoke test happy path skips when VERTEXAI_PROJECT unset so CI without GCP credentials stays green
-- [01-01]: Broad keyword matching in error test (project/credentials/etc.) avoids fragile assertions on litellm version-specific messages
-- [02-01]: count_tokens(model, text) signature reversed from utils.count_tokens(text, model) — consistent with litellm API; callers migrating must update argument order
-- [02-01]: Import-time EnvironmentError (not at first call) — fail fast before any LLM call is attempted
-- [02-01]: tiktoken cl100k_base fallback for unknown model names in count_tokens
-- [02-01]: No logging/exception translation/streaming wrapper — thin pass-through only
-- [02-02]: Delete llm_utils.py with callers still present (user-approved) — app intentionally broken until Phase 3/4 migrations complete
-- [02-02]: max_tokens fallback logic in llm_utils superseded by litellm.drop_params=True; no stub/shim needed
-- [03-01]: Remove os import entirely since all usages were in the dead constructor code being removed
-- [03-01]: Replace provider dispatch + _call_openai/_call_anthropic with single _call_llm() method calling llm_client.completion()
-- [03-01]: _should_use_llm_enhancement guard simplified — no instance-level client to check, use_llm_enhancement flag is sufficient
-- [03-02]: Both dispatch blocks in RepositorySelector replaced (select_relevant_files AND select_relevant_repos had identical provider branches)
-- [03-02]: if not self.llm_client guards removed from both methods — llm_client module always available, errors bubble up as exceptions
-- [03-02]: os import removed entirely — all usages were in dead constructor code
-- [03-03]: os import kept in repo_overview.py — used for path operations (os.path.join, os.path.exists, os.sep, os.path.dirname, os.path.basename)
-- [03-03]: generate_overview guard simplified from 'if readme_content and self.llm_client' to 'if readme_content' — llm_client module always available
-- [03-03]: Unreachable fallback return after try/except removed — only triggered when provider was neither openai nor anthropic
-- [Phase 03-04]: os import kept in iterative_agent.py — used for path operations throughout ~3200-line file
-- [Phase 03-04]: System message in messages list (not system= kwarg) for litellm/Gemini/VertexAI compatibility
-- [Phase 03-04]: openai/anthropic kept in requirements.txt — answer_generator.py still imports them; deferred to Phase 4
-- [04-02]: No replacement for deleted provider field — litellm routing controlled entirely by MODEL env var prefix (vertex_ai/...)
-- [04-02]: All BASE_URL references removed from .env.example — litellm vertex_ai/ prefix + ADC handles endpoint routing without manual base URL
-- [04-01]: os import kept in answer_generator.py — still needed for os.getenv('MODEL') in __init__
-- [04-01]: raw_response variable name preserved in generate() — used downstream by _parse_response_with_summary() in multi-turn mode
-- [04-01]: None-guard (or '' + if not chunk_text: continue) applied to both streaming loops per RESEARCH.md litellm pitfall
-- [04-01]: _stream_with_summary_filter() chunk variable is plain string (same type as before) — buffering/regex logic unchanged
-- [05-01]: count_tokens removed from utils import in answer_generator.py — fully routed through llm_client module
-- [05-01]: MODEL fallback uses llm_client.DEFAULT_MODEL (not hardcoded string) — single source of truth for default model
-- [05-01]: openai and anthropic removed from requirements.txt — no fastcode/ file imports them post-Phase 4
-- [05-01]: .env.example MODEL updated from placeholder to vertex_ai/ prefix example; LITELLM_MODEL entry added
-- [Phase 06-01]: litellm.embedding() with task_type kwarg routes to VertexAI without provider-specific client code
-- [Phase 06-01]: embedding_dim=3072 read from config at init — no HTTP call at init time
-- [Phase 06-01]: embed_text() defaults task_type to RETRIEVAL_QUERY so retriever.py callers require zero changes
-- [Phase 06-01]: item["embedding"] dict-style access used (not item.embedding) for litellm version safety
-- [Phase 07-01]: R8+R10 committed atomically to prevent config-absent deploy window with missing sentence-transformers package
-- [Phase 07-01]: ENV TOKENIZERS_PARALLELISM=false left in Dockerfile — harmless no-op, out of R9 scope
-- [Phase 07-02]: load_dotenv() at module level means test runs live in dev (.env has VERTEXAI_PROJECT) and skips in CI (no .env) — consistent with test_vertexai_smoke.py pattern
-- [Phase 07-02]: CodeEmbedder imported inside test method to avoid import-time side effects in skipped environments
+- [v1.2 scope]: PKG-01 requires hatchling editable install — follow PKG-01 spec (editable install for importability), not research recommendation (no build-system)
+- [v1.2 scope]: Pin uv to `0.10.6` in Dockerfile; never use `:latest`
+- [10-01]: Removed MODEL env var entirely (not aliased) — aliasing would preserve confusion; clean break with MIGRATION NOTE (v1.2) is clearer
+- [10-01]: Kept import os and load_dotenv() in answer_generator.py — both still used by other code in the file
+- [v1.1 deferred → Phase 10, now DONE]: MODEL/LITELLM_MODEL independence was operational confusion risk — DEBT-04 resolved in 10-01
+- [v1.1 deferred → Phase 9]: embed_text() default task_type latent fragility — DEBT-02 makes line 415 explicit
+- [08-01]: Used [dependency-groups] dev (PEP 735) rather than [project.optional-dependencies] — stricter isolation, uv recommended approach
+- [08-01]: Did NOT add [tool.hatch.build.targets.wheel] — hatchling auto-discovered fastcode/ at repo root without it
+- [08-02]: Used git rm to delete requirements.txt atomically; all four Phase 8 success criteria passed on first attempt
+- [09-01]: uv pinned to 0.10.6 via COPY --from (never :latest); Task 1 required no .dockerignore changes; TOKENIZERS_PARALLELISM removed as dead env var
+- [09-02]: Delete all six dead lines from __init__.py (import os, import platform, and Darwin if-block) — leaving either import unused would fail F401 linting
+- [09-02]: Use uppercase RETRIEVAL_QUERY in retriever.py task_type kwarg — matches embedder.py default exactly to avoid runtime validation error
+- [Phase 10-02]: DEBT-03 confirmed live: gemini-embedding-001 accepts CODE_RETRIEVAL_QUERY task_type — asymmetric pairing at retriever.py line 734 is valid
+- [Phase 10-02]: DEBT-05 confirmed live: _stream_with_summary_filter() correctly suppresses SUMMARY tags — no leakage observed
 
 ### Pending Todos
 
@@ -98,12 +67,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- [v1.1 tech debt]: `retriever.py` lines 415, 734 rely on `embed_text()` default `task_type`; explicit kwarg recommended
-- [v1.1 tech debt]: `fastcode/__init__.py` platform import block is dead code post sentence-transformers removal
-- [v1.0/v1.1 open]: `_stream_with_summary_filter()` chunk boundary behavior with litellm — needs live multi-turn session to test
+- [Phase 10 — RESOLVED]: DEBT-03 and DEBT-05 required live GCP credentials — both verified successfully via .env ADC on 2026-02-26
 
 ## Session Continuity
 
-Last session: 2026-02-25
-Stopped at: v1.1 milestone completed — all phases executed, verified (11/11 requirements), audited (tech_debt), and archived
+Last session: 2026-02-26
+Stopped at: Completed 10-02-PLAN.md (DEBT-03 and DEBT-05 resolved; live smoke tests added and verified against GCP)
 Resume file: None

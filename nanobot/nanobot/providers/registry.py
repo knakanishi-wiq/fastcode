@@ -160,6 +160,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
 
     # Gemini: needs "gemini/" prefix for LiteLLM.
+    # Gemini 3 models require temperature >= 1.0 to avoid infinite loops and
+    # degraded reasoning performance.
     ProviderSpec(
         name="gemini",
         keywords=("gemini",),
@@ -174,7 +176,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="",
         default_api_base="",
         strip_model_prefix=False,
-        model_overrides=(),
+        model_overrides=(
+            ("gemini-3", {"temperature": 1.0}),
+        ),
     ),
 
     # Zhipu: LiteLLM uses "zai/" prefix.

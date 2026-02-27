@@ -1,377 +1,365 @@
-# Domain Pitfalls: litellm + VertexAI Migration
+# Pitfalls Research
 
-**Domain:** LLM provider abstraction migration (direct openai/anthropic → litellm + VertexAI)
-**Project:** FastCode — litellm provider migration
-**Researched:** 2026-02-24
-**Overall confidence:** HIGH (based on direct codebase analysis + litellm/VertexAI documented behavior)
+**Domain:** Python packaging migration — requirements.txt to uv (pyproject.toml + uv.lock)
+**Project:** FastCode — v1.2 uv Migration & Tech Debt Cleanup
+**Researched:** 2026-02-26
+**Confidence:** HIGH (official uv docs verified; specific package behavior MEDIUM where wheel availability varies by platform)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that require rewrites, cause silent regressions, or break the service at runtime.
-
----
-
-### Pitfall 1: tiktoken Token Counting Silently Wrong for VertexAI Models
+### Pitfall 1: uv.lock Added to .gitignore — Defeats the Entire Point of uv
 
 **What goes wrong:**
-`fastcode/utils.py` uses `tiktoken.encoding_for_model(model)` for all token counting. tiktoken only knows OpenAI model families. When `model` becomes `vertex_ai/gemini-1.5-pro` or `vertex_ai/claude-3-5-sonnet@20241022`, `tiktoken.encoding_for_model()` raises `KeyError` and silently falls back to `cl100k_base` (GPT-4 encoding). Gemini and Claude have different tokenizers; this under-counts or over-counts tokens by 15–40% depending on content.
+Developer adds `uv.lock` to `.gitignore` thinking "lockfiles are machine-specific" (conflating with `node_modules` or `__pycache__`). CI installs whatever the latest resolution produces, not what was tested locally. Production image may install different package versions than development.
 
-**Where it happens in FastCode:**
-- `fastcode/utils.py` — `count_tokens()` and `truncate_to_tokens()` (both called with `self.model`)
-- `fastcode/answer_generator.py` — `generate()` and `generate_stream()` call `count_tokens(prompt, self.model)` to decide whether to truncate context
-- The token budget calculation: `available_input_tokens = max_context_tokens - max_tokens - reserve_tokens` is the only guard before sending a request. Wrong token counts mean this guard either truncates too early (wastes context) or too late (overflows the model's context window, causing a 400 error at API call time).
+**Why it happens:**
+`.python-version` and `.venv/` should be gitignored, and those look similar to `uv.lock`. Muscle memory from Python workflow where `requirements.txt` was the pinned file and a separate `requirements.in` was the source of truth — in uv, `pyproject.toml` is the "requirements.in" equivalent and `uv.lock` is the "requirements.txt" equivalent.
 
-**Consequences:**
-- 400 errors mid-request if context overflows (happens during streaming, not caught cleanly)
-- Context truncated unnecessarily early → degraded answer quality
-- The fallback silently accepts wrong counts — no warning is logged
+**How to avoid:**
+Commit `uv.lock` to git. uv docs are explicit: "The lockfile should be checked into version control, allowing for consistent and reproducible installations across machines."
 
-**Prevention:**
-Replace the tiktoken-based `count_tokens()` with `litellm.token_counter(model=model, text=text)` after migration. litellm's token counter handles VertexAI model names and falls back to a reasonable approximation rather than using OpenAI-specific tokenizer encoding.
-
-**Detection (warning signs):**
-- `KeyError` in logs from tiktoken during initial testing with a VertexAI model name
-- Prompt truncation logs firing earlier than expected (check `"Prompt exceeds limit"` log line)
-- Answer quality drops on long-context queries after migration
-
-**Phase:** Address in the token counting migration step, before any integration testing.
-
----
-
-### Pitfall 2: VertexAI Model Name Format Is Not Obvious and Varies by Model Family
-
-**What goes wrong:**
-litellm requires the `vertex_ai/` prefix for VertexAI routing. The model name after the prefix must match VertexAI's exact model ID format, which differs between Gemini models and Anthropic-on-Vertex models:
-
-- Gemini: `vertex_ai/gemini-1.5-pro-002` (no `@` version suffix in most cases)
-- Anthropic-on-Vertex: `vertex_ai/claude-3-5-sonnet@20241022` (requires the `@VERSION` suffix — without it, VertexAI rejects the request)
-- Using the standard Anthropic format `anthropic/claude-3-5-sonnet-20241022` (hyphen, not `@`) will route to Anthropic's API, not VertexAI, silently ignoring the intended provider
-
-FastCode currently stores the model name in a single `MODEL` env var. After migration, the `vertex_ai/` prefix must be included in the model name, not added by application logic separately.
-
-**Where it happens in FastCode:**
-- `MODEL` env var consumed identically by `answer_generator.py`, `query_processor.py`, `iterative_agent.py`, and `repo_overview.py`
-- `openai_chat_completion()` in `llm_utils.py` calls `client.chat.completions.create(model=self.model, ...)` — the model name is passed straight through
-
-**Consequences:**
-- Requests silently routed to Anthropic Direct instead of VertexAI (charges wrong account, bypasses GCP auth)
-- 404 or 400 from VertexAI if model version suffix is wrong (e.g., missing `@20241022`)
-- Different models within VertexAI behave differently under the same config
-
-**Prevention:**
-Document the exact env var format in `.env.example`. Test with a simple `litellm.completion(model="vertex_ai/...", messages=[...])` smoke test before wiring it into FastCode. Use `VERTEX_AI_MODEL=vertex_ai/gemini-1.5-pro` for Gemini; `vertex_ai/claude-3-5-sonnet@20241022` for Claude-on-Vertex.
-
-**Detection (warning signs):**
-- Requests succeed but bill to Anthropic, not GCP
-- API error mentioning "model not found" or version mismatch from VertexAI endpoint
-- litellm logs show routing to `anthropic` instead of `vertex_ai`
-
-**Phase:** Address during VertexAI config setup, before code migration begins.
-
----
-
-### Pitfall 3: Streaming Response Object Structure Is Different — Will Break `generate_stream()`
-
-**What goes wrong:**
-The current streaming paths use provider-specific iteration:
-
-- OpenAI path: iterates `for chunk in response`, reads `chunk.choices[0].delta.content`
-- Anthropic path: uses `with self.client.messages.stream(...) as stream: for text in stream.text_stream`
-
-litellm's sync streaming returns a generator of `ModelResponse` objects with `choices[0].delta.content` (OpenAI-compatible format for all providers). The Anthropic-style `messages.stream()` context manager does not exist in litellm. Calling `litellm.completion(..., stream=True)` and treating it like an Anthropic stream context manager will raise `AttributeError`.
-
-**Where it happens in FastCode:**
-- `fastcode/answer_generator.py` — `_generate_openai_stream()` and `_generate_anthropic_stream()` are both called from `_stream_with_summary_filter()` depending on `self.provider`
-- `_stream_with_summary_filter()` contains the summary-tag filtering logic (120+ lines); it yields `(original_chunk, filtered_chunk)` tuples
-- `generate_stream()` calls `_stream_with_summary_filter()` and drives the SSE response in `web_app.py`
-
-**Consequences:**
-- `_generate_anthropic_stream()` crashes immediately if rewritten to call `litellm.completion(stream=True)` without updating the iteration pattern
-- Summary-tag filtering (`<SUMMARY>` detection logic) receives chunks of different sizes than before — litellm chunk size varies by provider, so the tag-boundary detection buffer logic may not work correctly
-- The `(original_chunk, filtered_chunk)` generator contract must be preserved exactly for `generate_stream()` callers
-
-**Prevention:**
-After replacing both `_generate_openai_stream()` and `_generate_anthropic_stream()` with a single litellm call, verify that the iteration pattern is:
-```python
-for chunk in litellm.completion(..., stream=True):
-    delta = chunk.choices[0].delta
-    if delta and delta.content:
-        yield delta.content
+Correct `.gitignore` additions for a uv project:
 ```
-Do not try to use `chunk.delta.text` (Anthropic-style) — litellm normalizes to `choices[0].delta.content` for all providers.
+.venv/
+*.pyc
+__pycache__/
+```
 
-**Detection (warning signs):**
-- `AttributeError: 'ModelResponse' has no attribute 'delta'` or similar in streaming path
-- Streaming tests return empty output or hang on first SSE chunk
-- Summary tags pass through unfiltered (chunk boundary shifts make the buffer logic miss the tag)
+Do NOT add `uv.lock` to `.gitignore`.
 
-**Phase:** Highest-risk code path. Test streaming end-to-end (both SSE and non-streaming) before marking migration complete.
+**Warning signs:**
+- CI produces different package versions than local dev
+- `uv sync --locked` fails in CI ("lockfile does not match")
+- `uv.lock` never appears in git status after `uv lock` runs
 
----
-
-### Pitfall 4: ADC Authentication Fails Silently in Docker
-
-**What goes wrong:**
-Application Default Credentials (ADC) work via `gcloud auth application-default login` on a developer workstation, which writes credentials to `~/.config/gcloud/application_default_credentials.json`. In Docker, this file must be explicitly mounted into the container. litellm's VertexAI handler calls `google.auth.default()` at request time — if credentials are not present, it raises `google.auth.exceptions.DefaultCredentialsError` at the first LLM call, not at startup. The FastCode initialization pattern (deferred errors until first API call) means this fails silently during startup checks.
-
-**Where it happens in FastCode:**
-- `fastcode/answer_generator.py` `_initialize_client()` — logs a warning for missing `OPENAI_API_KEY` but does not raise; initialization succeeds with `client = None` or a partial client
-- After migration, `litellm.completion()` is called without any client object (litellm manages auth internally via env vars and ADC), so the first call to any endpoint is when auth is validated
-
-**Consequences:**
-- Container starts successfully with no errors logged
-- First query returns `"Error generating answer: google.auth.exceptions.DefaultCredentialsError"` to the user
-- Debugging is difficult because the error appears at query time, not startup
-
-**Prevention:**
-1. Mount ADC credentials in `docker-compose.yml`:
-   ```yaml
-   volumes:
-     - ~/.config/gcloud:/root/.config/gcloud:ro
-   ```
-2. Set `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to the mounted file, OR use Workload Identity in GCP
-3. Add a startup health check that makes a trivial litellm call (single token generation) to validate auth before the service is marked healthy
-4. Set `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` env vars (required by litellm's VertexAI handler)
-
-**Detection (warning signs):**
-- Service starts cleanly but first query fails with credentials error
-- `docker logs fastcode` shows no errors at startup
-- ADC credentials file not present inside the container (`docker exec fastcode ls ~/.config/gcloud/`)
-
-**Phase:** Must be addressed in the Docker/config setup phase, verified before deploying to any shared environment.
+**Phase to address:**
+Phase 1 (pyproject.toml + uv.lock setup). Verify `git status` shows `uv.lock` as tracked before proceeding.
 
 ---
 
-### Pitfall 5: `system` Parameter Handled Differently Across Providers via litellm
+### Pitfall 2: Extras Syntax Works in pyproject.toml BUT Version Constraints Must Not Use `>=` With a Space
 
 **What goes wrong:**
-`fastcode/iterative_agent.py`'s `_call_llm()` passes a `system` message as the first message in the `messages` list using the OpenAI format:
-```python
-messages=[
-    {"role": "system", "content": "You are a precise code analysis agent..."},
-    {"role": "user", "content": prompt}
+`requirements.txt` allows `litellm[google]>=1.80.8` with no quoting concerns. In `pyproject.toml`, PEP 508 dependency strings inside TOML arrays must be quoted strings, and the entire spec is one string. The extras bracket syntax is the same, but common mistakes occur with spacing and quotes:
+
+```toml
+# WRONG — unquoted
+dependencies = [
+  litellm[google]>=1.80.8,
+]
+
+# WRONG — missing closing quote
+dependencies = [
+  "litellm[google]>=1.80.8,
+]
+
+# CORRECT
+dependencies = [
+  "litellm[google]>=1.80.8",
 ]
 ```
-litellm normalizes this for most providers. However, some VertexAI models (notably Gemini) do not support `role: system` in the messages array; litellm converts system messages to a `system_instruction` parameter in the VertexAI API call, but this behavior changed across litellm versions. Gemini also returns an error if the messages array starts with a system message and the model does not support the `system_instruction` parameter.
 
-**Where it happens in FastCode:**
-- `fastcode/iterative_agent.py` `_call_llm()` — uses explicit `{"role": "system", ...}` message
-- `fastcode/answer_generator.py` `_generate_openai()` and `_generate_openai_stream()` — pass a single `user` message (no system message), so this is safer
+`uv add` handles this correctly when using the CLI. The issue arises only when hand-editing `pyproject.toml` or using `uv add -r requirements.txt` and then manually modifying the output.
 
-**Consequences:**
-- 400 error from VertexAI Gemini models: "Invalid role 'system' in messages"
-- If litellm does convert automatically, the system prompt behavior may change subtly (system instructions have different weight in Gemini vs OpenAI)
+**Why it happens:**
+TOML string syntax is unfamiliar to developers coming from requirements.txt. PEP 508 extras and version specs look like they might be TOML syntax but they are string content.
 
-**Prevention:**
-After migration, test the iterative agent specifically with the VertexAI model. If using Gemini, verify litellm version behavior on system message conversion. If using Claude-on-Vertex, the system message format is compatible.
+**How to avoid:**
+Use `uv add "litellm[google]>=1.80.8"` for all packages with extras — let uv write the pyproject.toml entry. Verify the result in `pyproject.toml` has the entry as a quoted string. For the full migration from `requirements.txt`, use `uv add -r requirements.txt` which handles the translation.
 
-**Detection (warning signs):**
-- Iterative agent queries fail with 400 errors, while non-agent queries work fine
-- Error message mentions "invalid role" or "system message not supported"
-- Issue is Gemini-specific; Claude-on-Vertex handles system messages correctly
+**Warning signs:**
+- `uv lock` fails with a TOML parse error
+- Package installs without its extras (i.e., `litellm` installs but `google-cloud-aiplatform` is missing)
+- `uv add --dry-run litellm[google]` shows different deps than expected
 
-**Phase:** Test in iterative agent integration tests specifically.
+**Phase to address:**
+Phase 1 (pyproject.toml authoring). Validate by running `uv sync` and checking that `google-cloud-aiplatform` appears in `.venv`.
 
 ---
 
-## Moderate Pitfalls
-
----
-
-### Pitfall 6: `llm_utils.openai_chat_completion()` `max_tokens` Fallback Is Unnecessary but Must Be Removed Correctly
+### Pitfall 3: Dev Dependencies in Wrong Section — pytest and test deps as Runtime Dependencies
 
 **What goes wrong:**
-`fastcode/llm_utils.py` implements a `BadRequestError` retry: if `max_tokens` is rejected, it retries with `max_completion_tokens`. This was written for OpenAI model differences (o1/o3 models use `max_completion_tokens`). After migration to litellm, this wrapper is no longer needed because litellm's `drop_params=True` (already used in Nanobot's provider) silently handles unsupported parameters. However, if `openai_chat_completion()` is kept and called with a litellm call, it will catch `litellm.exceptions.BadRequestError` (not `openai.BadRequestError`) — the import at the top of `llm_utils.py` is `from openai import BadRequestError`, which will not catch litellm-wrapped errors.
+`requirements.txt` does not distinguish dev from runtime — everything is one flat list. When migrating, the naive path is `uv add -r requirements.txt`, which puts `pytest`, `pytest-asyncio`, `pytest-cov` into `[project.dependencies]` (runtime). These then get installed in the production Docker image, bloating it unnecessarily.
 
-**Where it happens in FastCode:**
-- `fastcode/llm_utils.py` — `openai_chat_completion()` wrapper
-- Called from `answer_generator.py`, `query_processor.py`, `iterative_agent.py`
+FastCode's `requirements.txt` mixes: `pytest`, `pytest-asyncio`, `pytest-cov` (test-only) with runtime packages.
 
-**Prevention:**
-During migration, replace all calls to `openai_chat_completion()` with `litellm.completion()` directly. Do not attempt to keep the wrapper by changing the exception type — it adds complexity for no benefit since litellm handles parameter normalization.
+**Why it happens:**
+`uv add -r requirements.txt` has no way to know which packages are dev-only — it adds everything to `[project.dependencies]` unless told otherwise.
 
-**Detection (warning signs):**
-- After migration, 400 errors that should be caught are surfacing as unhandled exceptions
-- `openai.BadRequestError` never raised but errors still occur
-
-**Phase:** Clean up during litellm replacement phase.
-
----
-
-### Pitfall 7: Duplicate Client Initialization Across Four Files Creates Four Separate Auth Contexts
-
-**What goes wrong:**
-Each of the four LLM-calling files (`answer_generator.py`, `query_processor.py`, `iterative_agent.py`, and `repo_overview.py`) independently reads `os.getenv("OPENAI_API_KEY")`, `os.getenv("MODEL")`, etc. and creates its own client. After migration to litellm, the client is replaced by `litellm.completion()` calls which read credentials from environment variables globally. This is actually simpler. The pitfall is that each file currently also reads `GOOGLE_CLOUD_PROJECT`, `VERTEXAI_LOCATION`, and similar env vars at a different time; if any env var is missing at module init (e.g., it's set after `load_dotenv()` runs), only one of the four files might notice.
-
-**Where it happens in FastCode:**
-- `fastcode/answer_generator.py`, `fastcode/query_processor.py`, `fastcode/iterative_agent.py`, `fastcode/repo_overview.py` — all call `load_dotenv()` and `os.getenv()` in `__init__`
-
-**Prevention:**
-After migration, litellm reads env vars at call time (not at import time), so the distributed `load_dotenv()` pattern is harmless. However, document the required env vars (`VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`, `MODEL`) in one place (`.env.example`) and verify they are all present before each component initializes.
-
-**Detection (warning signs):**
-- One call site works (VertexAI auth succeeds) but another fails (credentials not found)
-- `load_dotenv()` order dependency issues on container startup
-
-**Phase:** Verify during integration testing across all four call sites.
-
----
-
-### Pitfall 8: litellm Sync vs Async API — FastCode Is Synchronous, Nanobot Is Async
-
-**What goes wrong:**
-FastCode uses synchronous LLM calls throughout (`response = openai_chat_completion(...)`). Nanobot uses `await acompletion(...)` (async). litellm provides both `litellm.completion()` (sync) and `litellm.acompletion()` (async). FastCode's FastAPI endpoints use `async def` route handlers but call synchronous generator functions that yield streaming chunks. Mixing sync litellm calls inside async FastAPI route handlers works but blocks the event loop.
-
-The specific risk: if litellm's sync `completion()` is called from within an `async def` handler, it blocks the event loop during the network I/O. For short queries this is acceptable; for long-context VertexAI calls (200k token context window) this can block the FastAPI event loop for 10–60 seconds.
-
-**Where it happens in FastCode:**
-- `web_app.py` and `api.py` both define `async def stream_query(...)` which calls `fastcode.generate_stream(...)` — a synchronous generator run inside `StreamingResponse`
-- FastAPI's `StreamingResponse` with a sync generator runs it in a thread pool by default, so this is actually safe in practice
-
-**Prevention:**
-Keep sync litellm calls (`litellm.completion()`) for FastCode, consistent with the existing synchronous pattern. Do not mix `acompletion` into FastCode's synchronous pipeline. The StreamingResponse thread pool isolation means this is safe.
-
-**Detection (warning signs):**
-- Event loop blocking: other API endpoints become unresponsive during active streaming queries
-- `RuntimeError: Event loop is closed` or `RuntimeError: This event loop is already running`
-
-**Phase:** Low risk given existing sync pattern. Note in migration guide to not switch to `acompletion`.
-
----
-
-### Pitfall 9: `temperature` Parameter Rejected by Certain VertexAI Models
-
-**What goes wrong:**
-Some models available on VertexAI do not accept a `temperature` parameter (notably the reasoning/thinking variants like `gemini-2.0-flash-thinking`). FastCode passes `temperature` in every LLM call. Without `litellm.drop_params = True`, these calls return a 400 error. Nanobot's `LiteLLMProvider` already sets `litellm.drop_params = True` globally, but FastCode's migration will use litellm without that global setting unless explicitly configured.
-
-**Where it happens in FastCode:**
-- All four LLM call sites pass `temperature=self.temperature` (values: 0.4 in `answer_generator.py`, 0.3 in `query_processor.py`, 0.2 in `iterative_agent.py`)
-- `openai_chat_completion()` wrapper passes `temperature` as a kwarg directly to the API
-
-**Prevention:**
-At the point where litellm is initialized in FastCode, add:
-```python
-import litellm
-litellm.drop_params = True
+**How to avoid:**
+For FastCode specifically, add test packages to the `dev` dependency group:
+```bash
+uv add --dev pytest pytest-asyncio pytest-cov
 ```
-This should be set once at application startup (e.g., in `fastcode/main.py` or in a new `fastcode/llm_client.py` module), not per-call.
 
-**Detection (warning signs):**
-- 400 error "temperature is not supported for this model"
-- Only affects reasoning-variant models; standard Gemini and Claude models accept temperature
-
-**Phase:** Set `litellm.drop_params = True` in the initialization step.
-
----
-
-### Pitfall 10: VertexAI Requires `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` — Missing Env Vars Produce Cryptic Errors
-
-**What goes wrong:**
-litellm's VertexAI handler requires `VERTEXAI_PROJECT` (GCP project ID) and `VERTEXAI_LOCATION` (e.g., `us-central1`) to be set as environment variables. If either is missing, the error message from the VertexAI API is typically an auth/permissions error (`401: Request had invalid authentication credentials`) rather than a config error, because the API call goes to a generic endpoint that rejects it at auth. This is misleading: it looks like an auth problem when it is actually a config problem.
-
-**Where it happens in FastCode:**
-- FastCode currently reads `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MODEL`, `BASE_URL`
-- After migration, new env vars `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` must be added
-- `.env.example` does not currently include these
-
-**Prevention:**
-Update `.env.example` with:
+This creates a `[dependency-groups]` section in `pyproject.toml`:
+```toml
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=5",
+]
 ```
-VERTEXAI_PROJECT=your-gcp-project-id
-VERTEXAI_LOCATION=us-central1
-MODEL=vertex_ai/gemini-1.5-pro
+
+In Docker production builds, exclude dev deps:
+```dockerfile
+RUN uv sync --locked --no-dev
 ```
-Add a startup validation that checks for these vars and raises a clear `ConfigurationError` before the first LLM call.
 
-**Detection (warning signs):**
-- 401 error on first VertexAI call when ADC credentials appear correct
-- `google.api_core.exceptions.PermissionDenied` with no obvious cause
-- Works with `gcloud` CLI but fails in Python
+**Warning signs:**
+- Docker image is larger than expected (pytest installed in production)
+- `uv sync --no-dev` still installs test packages
+- `uv tree` shows pytest as a runtime dependency
 
-**Phase:** Config setup phase. Block proceeding to code migration until smoke test passes with VertexAI.
-
----
-
-## Minor Pitfalls
+**Phase to address:**
+Phase 1 (pyproject.toml setup). Verify by running `uv sync --no-dev` and confirming pytest is absent from `.venv`.
 
 ---
 
-### Pitfall 11: litellm Logging Is Verbose by Default — Logs API Keys in Debug Mode
+### Pitfall 4: Docker Layer Cache Broken — Copying All Source Before Dependencies
 
 **What goes wrong:**
-litellm logs request/response details at DEBUG level, including full messages and (in some versions) authorization headers. FastCode already has a known issue with LLM responses being printed to stdout (`query_processor.py` line 536). Adding litellm without suppressing its debug output will add more noise and potentially leak credentials in container logs.
-
-**Prevention:**
-Set `litellm.suppress_debug_info = True` alongside `litellm.drop_params = True` at startup. This is already done in Nanobot's `LiteLLMProvider.__init__()` — copy the same pattern.
-
-**Phase:** Initialization step.
-
----
-
-### Pitfall 12: Response Object Access Pattern Changes — `response.choices[0].message.content` Must Be Verified
-
-**What goes wrong:**
-FastCode has defensive attribute access guards like:
-```python
-if not response or not getattr(response, "choices", None):
-    raise ValueError(...)
-first_choice = response.choices[0]
-message = getattr(first_choice, "message", None)
-content = getattr(message, "content", None) if message else None
+The current Dockerfile pattern:
+```dockerfile
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+COPY . .
 ```
-litellm returns a `ModelResponse` object with the same OpenAI-compatible structure, so these guards should work. However, for VertexAI streaming chunks, `choices[0].delta.content` can be `None` on the final chunk (finish chunk) — this is the same as OpenAI behavior and FastCode's existing `if delta.content:` guard handles it. The risk is minimal but worth verifying.
+migrates naively to:
+```dockerfile
+COPY . .
+RUN uv sync --locked
+```
 
-**Prevention:**
-Keep the existing defensive access patterns. They are compatible with litellm's `ModelResponse`.
+This breaks layer caching: any source code change invalidates the dependency installation layer, causing a full `uv sync` on every build even when `pyproject.toml` and `uv.lock` haven't changed.
 
-**Phase:** Verify during integration testing.
+**Why it happens:**
+`uv sync` needs `pyproject.toml` AND `uv.lock` AND the project source (to install the project itself). Developers copy all files before syncing to satisfy all requirements in one step.
+
+**How to avoid:**
+Split into two sync operations using `--no-install-project`:
+```dockerfile
+COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /uvx /bin/
+
+ENV UV_LINK_MODE=copy
+
+# Step 1: Install deps only (this layer caches until pyproject.toml or uv.lock changes)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-dev --no-install-project
+
+# Step 2: Copy source and install the project itself
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
+```
+
+The `--no-install-project` flag installs all dependencies but not the FastCode project package itself. The dependency layer only rebuilds when `pyproject.toml` or `uv.lock` changes.
+
+**Warning signs:**
+- Every Docker build takes the same time regardless of whether only Python code changed
+- `uv sync` runs again even when only `fastcode/*.py` files changed
+- Build logs show package downloads on code-only changes
+
+**Phase to address:**
+Phase 2 (Dockerfile migration). This is the single biggest Docker performance win from the uv migration.
 
 ---
 
-### Pitfall 13: Multi-Turn Dialogue Passes `role: assistant` Messages — Verify VertexAI Compatibility
+### Pitfall 5: Missing UV_LINK_MODE=copy — Noisy Warnings With Cache Mounts
 
 **What goes wrong:**
-FastCode's multi-turn dialogue builds message history arrays with `role: user` and `role: assistant` alternating. VertexAI Gemini requires strict user/model alternation (using `role: model`, not `role: assistant`). litellm normalizes `assistant` → `model` for Gemini automatically, but this normalization must be verified, as it has had regressions in past litellm releases.
+When using `--mount=type=cache` in Dockerfile, the uv cache directory and the virtual environment directory are on different filesystems. uv defaults to hard-linking files between cache and venv, which fails silently with repeated warnings like:
+```
+warning: Failed to hardlink files; falling back to full copy
+```
+This does not break the build but fills logs and slows builds slightly.
 
-**Where it happens in FastCode:**
-- `fastcode/answer_generator.py` `_build_prompt()` builds dialogue history as `role: user` / `role: assistant` pairs
-- `fastcode/query_processor.py` similarly uses dialogue history
+**Why it happens:**
+Docker cache mounts create a separate tmpfs or overlay filesystem. Hard links cannot cross filesystem boundaries.
 
-**Prevention:**
-Test a multi-turn dialogue sequence specifically against VertexAI after migration. Use `litellm.utils.validate_messages()` if available to check message format.
+**How to avoid:**
+Set `ENV UV_LINK_MODE=copy` in the Dockerfile before any `uv sync` commands. This tells uv to copy files instead of hard-link, which works across filesystem boundaries.
 
-**Phase:** Integration testing phase.
+**Warning signs:**
+- Dockerfile build output contains "Failed to hardlink" warnings
+- Build is slower than expected despite cache mounts being used
+
+**Phase to address:**
+Phase 2 (Dockerfile migration). Add `ENV UV_LINK_MODE=copy` immediately after copying the uv binary.
 
 ---
 
-## Phase-Specific Warnings
+### Pitfall 6: uv Sync Removes Packages Not in Lockfile — Breaks Existing Workflows That pip install Extras
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| litellm dependency install | `google-cloud-aiplatform` transitive dependency conflicts with existing packages | Pin litellm version; test in fresh venv before adding to requirements.txt |
-| VertexAI config setup | Missing `VERTEXAI_PROJECT` / `VERTEXAI_LOCATION` causes misleading 401 errors | Smoke test before code migration (Pitfall 10) |
-| Token counting migration | tiktoken fallback silently wrong for VertexAI models | Replace with `litellm.token_counter()` immediately (Pitfall 1) |
-| Replacing direct clients | `llm_utils.openai_chat_completion()` wrapper catches wrong exception type | Delete wrapper, use `litellm.completion()` directly (Pitfall 6) |
-| Streaming migration | Anthropic stream context manager pattern incompatible with litellm | Rewrite both stream generators to use litellm chunk iteration (Pitfall 3) |
-| Docker deployment | ADC credentials not mounted, silent failure at query time | Mount `~/.config/gcloud` in docker-compose.yml (Pitfall 4) |
-| First integration test | `temperature` rejected by reasoning models | Set `litellm.drop_params = True` globally at startup (Pitfall 9) |
-| System message handling | Gemini rejects `role: system` in messages array | Test iterative agent separately from answer generator (Pitfall 5) |
+**What goes wrong:**
+`uv sync` performs exact environment synchronization: it **removes** packages present in `.venv` that are not in `uv.lock`. This differs fundamentally from `pip install`, which only adds packages. If any CI step or local workflow does `pip install some-tool` or `uv pip install something` after `uv sync`, the next `uv sync` will remove it.
+
+**Why it happens:**
+Developers coming from pip expect install commands to be additive. `uv sync` treats the lockfile as the complete truth about what should be installed.
+
+**How to avoid:**
+Never use `pip install` or `uv pip install` to add packages to the project environment. Always use `uv add` (updates `pyproject.toml` and `uv.lock`) or add packages to `[dependency-groups]`. For one-off tools, use `uvx tool` instead of installing into the project venv.
+
+In CI, use `uv sync --locked` (strict lockfile) not `pip install -r requirements.txt` alongside `uv sync`.
+
+**Warning signs:**
+- Package disappears from venv after running `uv sync`
+- CI fails because a package installed in an earlier step is no longer present
+- `uv sync` output shows "Removed X" for a package you intentionally installed
+
+**Phase to address:**
+Phase 1 (migration). Document in project README that `uv add` replaces `pip install`.
+
+---
+
+## Technical Debt Patterns
+
+Shortcuts that seem reasonable but create long-term problems.
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Keep `requirements.txt` alongside `pyproject.toml` for "compatibility" | Other tools still work with requirements.txt | Two sources of truth diverge silently; humans update the wrong one | Never — delete requirements.txt once pyproject.toml is validated |
+| Use `uv pip install` in Dockerfile instead of `uv sync` | Familiar pip-like syntax | Bypasses lockfile; no reproducibility guarantee; no dev/prod separation | Never in production images |
+| Pin uv version to `latest` in Dockerfile (`COPY --from=ghcr.io/astral-sh/uv:latest`) | Always gets latest uv features | Build breaks when uv releases a breaking change | Only in development; production images should pin to specific version |
+| Put all deps (including pytest) in `[project.dependencies]` to avoid learning `[dependency-groups]` | Simpler migration | pytest and test infra installed in production container; potential for test code to accidentally import in production | Never |
+| Skip `requires-python` in pyproject.toml | One less field to set | uv resolves deps for all Python versions, producing larger lockfile and potentially wrong wheels | Never for an app that knows its Python version |
+
+---
+
+## Integration Gotchas
+
+Common mistakes when connecting to external systems or workflows.
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Docker cache mounts | COPY all files before `uv sync` | Bind-mount only `pyproject.toml` + `uv.lock` for first sync; COPY source after |
+| CI (GitHub Actions) | `pip install -r requirements.txt` in CI after migration | Replace with `uv sync --locked` |
+| pytest execution | `python -m pytest` after `source .venv/bin/activate` | Use `uv run pytest` or activate venv correctly; `uv run` ensures sync before running |
+| pre-commit hooks | Hook env uses system Python, not project venv | Configure pre-commit to use `uv run` or install hooks inside the venv |
+| Docker CMD | `CMD ["python", "api.py"]` with no venv activation | Use `CMD ["/app/.venv/bin/python", "api.py"]` or `ENV PATH="/app/.venv/bin:$PATH"` |
+| faiss-cpu native build | Missing build tools in Docker image | faiss-cpu ships wheels for major platforms — wheels install cleanly; only fails if building from source without `build-essential` |
+
+---
+
+## Performance Traps
+
+Patterns that work but are slower than necessary.
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| COPY before sync in Dockerfile | Full uv sync on every code change during Docker build | Use `--no-install-project` two-step pattern | Every build after initial setup |
+| `uv sync` without cache mount in Docker | Full package download on every CI run | Add `--mount=type=cache,target=/root/.cache/uv` | CI becomes slow as package count grows |
+| Missing `--compile-bytecode` in production image | Import time is slightly slower; `SyntaxWarning` may appear | Set `ENV UV_COMPILE_BYTECODE=1` | Not a hard failure, but noticeable in production startup latency |
+| Running `uv lock` without `--locked` check in CI | Lock file can drift from `pyproject.toml` silently | Run `uv lock --locked` in CI to assert lockfile is current | When developer forgets to commit updated `uv.lock` after `uv add` |
+
+---
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Pinning uv to `latest` in production Dockerfile | Supply chain: `latest` tag can change; untested uv version auto-deploys | Pin to specific uv version: `COPY --from=ghcr.io/astral-sh/uv:0.10.4` |
+| Not using `--locked` in production syncs | Different package versions may install than were tested | Always use `uv sync --locked` in CI and Docker; `--frozen` is weaker (skips staleness check) |
+| Committing `.venv/` to git accidentally | Can include platform-specific compiled binaries; large repo pollution | uv auto-creates `.venv/.gitignore` to block this, but verify `.gitignore` at project root excludes `.venv/` |
+
+---
+
+## "Looks Done But Isn't" Checklist
+
+Things that appear complete but are missing critical pieces.
+
+- [ ] **pyproject.toml created:** Verify `uv sync` actually installs all packages — run `python -c "import faiss; import tree_sitter; import litellm; import mcp"` inside `.venv`
+- [ ] **Dev deps separated:** Verify `uv sync --no-dev` does NOT install pytest — run `uv sync --no-dev && python -m pytest --collect-only` should fail with ModuleNotFoundError
+- [ ] **uv.lock committed:** Run `git status` and confirm `uv.lock` is tracked (not in `.gitignore`)
+- [ ] **Dockerfile layer caching works:** Change a `.py` file only and rebuild Docker — the `uv sync --no-install-project` step should use cache (no package downloads in output)
+- [ ] **Docker CMD uses venv Python:** Run `docker exec <container> which python` — should return `/app/.venv/bin/python`, not `/usr/bin/python`
+- [ ] **requirements.txt deleted:** Confirm no stale `requirements.txt` that could mislead future developers
+- [ ] **CI updated:** CI workflow file uses `uv sync --locked`, not `pip install -r requirements.txt`
+- [ ] **Tree-sitter packages install correctly:** These are compiled packages — verify `import tree_sitter_python` succeeds post-migration (wheel-only, no source build needed for common platforms)
+
+---
+
+## Recovery Strategies
+
+When pitfalls occur despite prevention, how to recover.
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| uv.lock in .gitignore and diverged | MEDIUM | Remove from .gitignore, run `uv lock`, commit uv.lock, verify CI passes |
+| Wrong packages in runtime deps (pytest in prod) | LOW | `uv remove pytest pytest-asyncio pytest-cov && uv add --dev pytest pytest-asyncio pytest-cov` |
+| Docker cache never hits | LOW | Add `--no-install-project` two-step pattern; rebuild from scratch once to establish cache |
+| Package missing extras (litellm missing google deps) | LOW | `uv remove litellm && uv add "litellm[google]>=1.80.8"` |
+| requirements.txt still present and diverged | LOW | Delete requirements.txt; ensure all deps are in pyproject.toml; run `uv lock` |
+| uv.lock conflicts after parallel branch merges | LOW | Run `uv lock` on the merged branch to regenerate; commit result |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+How roadmap phases should address these pitfalls.
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| uv.lock in .gitignore | Phase 1: pyproject.toml + uv.lock setup | `git ls-files uv.lock` returns the file path |
+| Extras syntax wrong in pyproject.toml | Phase 1: pyproject.toml authoring | `uv run python -c "from litellm import completion"` succeeds; `google-cloud-aiplatform` in `.venv` |
+| Dev deps in wrong section | Phase 1: dependency group setup | `uv sync --no-dev && python -m pytest` fails with ImportError |
+| Docker layer cache broken | Phase 2: Dockerfile migration | Touch `fastcode/main.py`, rebuild Docker; no package downloads in output |
+| UV_LINK_MODE missing | Phase 2: Dockerfile migration | No "Failed to hardlink" warnings in Docker build output |
+| uv sync removes packages | Phase 1: migration docs | `uv add` replaces `pip install` in all developer docs and CI scripts |
+
+---
+
+## Specific Package Notes
+
+### litellm[google]
+- The `[google]` extra installs `google-cloud-aiplatform` and related GCP packages. This extra is large (~150MB transitive deps). Confirm it appears in `uv.lock` after adding.
+- In pyproject.toml: `"litellm[google]>=1.80.8"` — extras bracket syntax is identical to requirements.txt.
+- Confidence: HIGH (tested syntax; PEP 508 extras work in pyproject.toml dependencies arrays)
+
+### mcp[cli]
+- The `[cli]` extra adds CLI tooling for the MCP server. Same bracket syntax applies.
+- In pyproject.toml: `"mcp[cli]"` — no version pin needed unless a specific version is required.
+- Confidence: HIGH
+
+### faiss-cpu
+- faiss-cpu ships binary wheels for `linux/amd64`, `macos/arm64`, `macos/x86_64`, and `win/amd64` for Python 3.8–3.12.
+- No source build required — uv will resolve the appropriate wheel automatically.
+- If building on a platform without a wheel (e.g., `linux/arm64`), build will fail unless `build-essential` is installed and faiss can be compiled from source. FastCode's Dockerfile uses `python:3.12-slim-bookworm` on amd64, which has wheels available.
+- Confidence: MEDIUM (wheel availability for common platforms is well-established; ARM Linux is a known gap)
+
+### tree-sitter and language packages (tree-sitter-python, tree-sitter-javascript, etc.)
+- All tree-sitter language packages (tree-sitter-python, tree-sitter-javascript, etc.) ship compiled wheels for common platforms since tree-sitter 0.21+.
+- These are wheel-only installs — no source compilation needed on supported platforms.
+- The `build-essential` and `git` packages already present in the Dockerfile cover the edge case where a source build is needed.
+- Confidence: MEDIUM (wheel availability confirmed for major platforms; edge cases on older Python/platform combos)
+
+### pytest and test packages
+- `pytest`, `pytest-asyncio`, `pytest-cov` must go in `[dependency-groups] dev`, NOT `[project.dependencies]`.
+- In uv: `uv add --dev pytest pytest-asyncio pytest-cov`
+- Confidence: HIGH
 
 ---
 
 ## Sources
 
-- Direct codebase analysis: `fastcode/answer_generator.py`, `fastcode/llm_utils.py`, `fastcode/query_processor.py`, `fastcode/iterative_agent.py`, `fastcode/utils.py` (2026-02-24)
-- Reference implementation: `nanobot/nanobot/providers/litellm_provider.py` — existing litellm usage patterns in this codebase (HIGH confidence)
-- litellm VertexAI documentation: https://docs.litellm.ai/docs/providers/vertex (MEDIUM confidence — architecture and env var names; verify model name formats at migration time)
-- litellm token counting: `litellm.token_counter()` documented at https://docs.litellm.ai/docs/completion/token_usage (MEDIUM confidence)
-- ADC in Docker patterns: standard GCP documentation pattern; `GOOGLE_APPLICATION_CREDENTIALS` env var and volume mount are well-established (HIGH confidence)
-- Gemini system message handling in litellm: reported in multiple litellm GitHub issues; litellm performs automatic conversion but version-dependent (MEDIUM confidence — verify against installed litellm version)
-- `litellm.drop_params` setting: documented in litellm core docs, demonstrated in `nanobot/nanobot/providers/litellm_provider.py` line 39 (HIGH confidence)
-- `litellm.suppress_debug_info`: demonstrated in `nanobot/nanobot/providers/litellm_provider.py` line 37 (HIGH confidence)
+- uv Docker integration guide: https://docs.astral.sh/uv/guides/integration/docker/ (HIGH confidence — official docs)
+- uv migration guide (pip to project): https://docs.astral.sh/uv/guides/migration/pip-to-project/ (HIGH confidence — official docs)
+- uv project dependencies: https://docs.astral.sh/uv/concepts/projects/dependencies/ (HIGH confidence — official docs)
+- uv pip compatibility: https://docs.astral.sh/uv/pip/compatibility/ (HIGH confidence — official docs)
+- uv Python version management: https://docs.astral.sh/uv/concepts/python-versions/ (HIGH confidence — official docs)
+- uv project init: https://docs.astral.sh/uv/concepts/projects/init/ (HIGH confidence — official docs)
+- uv sync behavior: https://docs.astral.sh/uv/concepts/projects/sync/ (HIGH confidence — official docs)
+- uv settings reference: https://docs.astral.sh/uv/reference/settings/ (HIGH confidence — official docs)
+- Current requirements.txt analysis: /Users/knakanishi/Repositories/FastCode/requirements.txt (direct codebase inspection)
+- Current Dockerfile analysis: /Users/knakanishi/Repositories/FastCode/Dockerfile (direct codebase inspection)
+- uv version in environment: 0.10.4 (Homebrew 2026-02-17) — confirmed installed
 
 ---
-
-*Research date: 2026-02-24*
+*Pitfalls research for: uv packaging migration (requirements.txt → pyproject.toml + uv.lock)*
+*Researched: 2026-02-26*

@@ -44,8 +44,19 @@ if not _location:
 DEFAULT_MODEL: str = os.environ.get("LITELLM_MODEL", "vertex_ai/gemini-2.0-flash-001")
 
 
+def _apply_model_constraints(model: str, kwargs: dict) -> None:
+    """Patch kwargs in-place for known model constraints.
+
+    Gemini 3 requires temperature >= 1.0; lower values cause infinite loops
+    and degraded reasoning (LiteLLM warning).
+    """
+    if "gemini-3" in model.lower() and kwargs.get("temperature", 1.0) < 1.0:
+        kwargs["temperature"] = 1.0
+
+
 def completion(model: str, messages: list, **kwargs):
     """Call litellm.completion() — exceptions bubble up raw."""
+    _apply_model_constraints(model, kwargs)
     return _completion(model=model, messages=messages, **kwargs)
 
 
@@ -54,6 +65,7 @@ def completion_stream(model: str, messages: list, **kwargs):
 
     Callers iterate chunks directly: for chunk in completion_stream(...): ...
     """
+    _apply_model_constraints(model, kwargs)
     return _completion(model=model, messages=messages, stream=True, **kwargs)
 
 
