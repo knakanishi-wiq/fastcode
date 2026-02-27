@@ -9,14 +9,14 @@ See: .planning/PROJECT.md (updated 2026-02-27)
 
 ## Current Position
 
-Phase: 11 — SQLite Schema and DB Init
+Phase: 12 — Indexer SQLite Integration
 Plan: 01 (Complete)
-Status: Phase 11 complete — ready for Phase 12
-Last activity: 2026-02-27 — Phase 11 Plan 01 complete; fastcode/db.py and tests/test_db.py created
+Status: Phase 12 Plan 01 complete — ready for Phase 13
+Last activity: 2026-02-27 — Phase 12 Plan 01 complete; index_repo() with SQLite change detection, IDX-01/IDX-02 done
 
 ```
-Progress: Phases 1–11 complete █████████████████████░░░░░░░░ 79% (11/14)
-v1.3:     Phase 11 ████ Phase 12 ░░░░ Phase 13 ░░░░ Phase 14 ░░░░
+Progress: Phases 1–12 complete ██████████████████████░░░░░░░ 82% (12/14)
+v1.3:     Phase 11 ████ Phase 12 ████ Phase 13 ░░░░ Phase 14 ░░░░
 ```
 
 ## Performance Metrics
@@ -44,6 +44,7 @@ v1.3:     Phase 11 ████ Phase 12 ░░░░ Phase 13 ░░░░ Phas
 
 *Updated after each plan completion*
 | Phase 11-sqlite-schema-and-db-init P01 | 2 | 2 tasks | 2 files |
+| Phase 12-indexer-integration P01 | 4 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,8 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [Phase 11-sqlite-schema-and-db-init]: Used executescript() for all DDL — cleaner single call vs N individual execute() calls
 - [Phase 11-sqlite-schema-and-db-init]: FTS5 content=chunks (content-linked) over contentless — Phase 13 retriever can get chunk text from FTS without extra join
 - [Phase 11-sqlite-schema-and-db-init]: WAL mode omitted — single-process CLI tool; no concurrent readers
+- [Phase 12-indexer-integration]: Skip files where parse_result.language=='unknown' (CodeParser never returns None for unknown extensions)
+- [Phase 12-indexer-integration]: Use pathspec 'gitignore' pattern (not deprecated 'gitwildmatch') for .gitignore parsing
 
 ### v1.3 Context
 
@@ -96,5 +99,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-27
-Stopped at: Completed 11-01-PLAN.md — fastcode/db.py (init_db), tests/test_db.py (7 tests), STOR-01/02/03 done
+Stopped at: Completed 12-01-PLAN.md — index_repo() with SQLite change detection (IDX-01, IDX-02), tests/test_indexer_sqlite.py (8 tests)
 Resume file: None
