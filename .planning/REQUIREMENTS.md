@@ -19,8 +19,8 @@
 
 ### Indexing
 
-- [ ] **IDX-01**: `Indexer` writes each chunk to the SQLite `chunks` table during repository indexing (replaces in-memory BM25 corpus construction)
-- [ ] **IDX-02**: Re-indexing detects unchanged files via `content_hash` comparison against the `sources` table and skips them without re-chunking or re-embedding
+- [x] **IDX-01**: `Indexer` writes each chunk to the SQLite `chunks` table during repository indexing (replaces in-memory BM25 corpus construction)
+- [x] **IDX-02**: Re-indexing detects unchanged files via `content_hash` comparison against the `sources` table and skips them without re-chunking or re-embedding
 
 ### Embedding Cache
 
@@ -56,8 +56,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BM25-01 | Phase 13 | Pending |
 | BM25-02 | Phase 13 | Pending |
 | BM25-03 | Phase 13 | Pending |
-| IDX-01 | Phase 12 | Pending |
-| IDX-02 | Phase 12 | Pending |
+| IDX-01 | Phase 12 | Complete |
+| IDX-02 | Phase 12 | Complete |
 | EMB-01 | Phase 14 | Pending |
 | EMB-02 | Phase 14 | Pending |
 
