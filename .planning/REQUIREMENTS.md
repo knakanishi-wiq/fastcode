@@ -13,8 +13,8 @@
 
 ### BM25 Retrieval
 
-- [ ] **BM25-01**: `HybridRetriever` BM25 search path queries `chunks_fts` using `bm25(chunks_fts)` ranking instead of loading a `BM25Okapi` object
-- [ ] **BM25-02**: FTS5 BM25 query supports filtering by `source_path` prefix to scope results to a specific indexed repository
+- [x] **BM25-01**: `HybridRetriever` BM25 search path queries `chunks_fts` using `bm25(chunks_fts)` ranking instead of loading a `BM25Okapi` object
+- [x] **BM25-02**: FTS5 BM25 query supports filtering by `source_path` prefix to scope results to a specific indexed repository
 - [ ] **BM25-03**: The `{repo_name}_bm25.pkl` index files are no longer written or loaded; BM25 corpus is derived entirely from the SQLite database
 
 ### Indexing
@@ -53,8 +53,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-01 | Phase 11 | Complete |
 | STOR-02 | Phase 11 | Complete |
 | STOR-03 | Phase 11 | Complete |
-| BM25-01 | Phase 13 | Pending |
-| BM25-02 | Phase 13 | Pending |
+| BM25-01 | Phase 13 | Complete |
+| BM25-02 | Phase 13 | Complete |
 | BM25-03 | Phase 13 | Pending |
 | IDX-01 | Phase 12 | Complete |
 | IDX-02 | Phase 12 | Complete |
