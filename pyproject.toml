@@ -25,7 +25,6 @@ dependencies = [
     "libcst",
     "faiss-cpu",
     "chromadb",
-    "rank-bm25",
     "networkx",
     "tiktoken",
     "litellm[google]>=1.80.8",
