@@ -90,7 +90,11 @@ Plans:
   2. BM25 results are scoped to the queried repository: chunks from other indexed repositories do not appear in results
   3. No `{repo_name}_bm25.pkl` file is written during indexing or read during retrieval — the `./data/` directory contains no pkl files after a fresh index
   4. BM25 result ranking for a known query against a known corpus returns the highest-scoring chunk as the first result
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — TDD: FTS5-backed _keyword_search with repo scoping (BM25-01, BM25-02)
+- [ ] 13-02-PLAN.md — Remove pkl BM25 infrastructure and rank-bm25 dependency (BM25-03)
 
 ### Phase 14: Embedding Cache Migration
 **Goal**: `CodeEmbedder` checks a SQLite `embedding_cache` table before calling `litellm.embedding()`, eliminating DiskCache
