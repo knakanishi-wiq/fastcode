@@ -47,7 +47,7 @@ Full details: `.planning/milestones/v1.2-ROADMAP.md`
 
 - [x] **Phase 11: SQLite Schema and DB Init** — Database foundation: chunks, sources, and FTS5 tables *(1 plan)* (completed 2026-02-27)
 - [x] **Phase 12: Indexer Integration** — Write chunks to SQLite during indexing; skip unchanged files (completed 2026-02-27)
-- [ ] **Phase 13: BM25 Retriever Swap** — HybridRetriever queries FTS5; pkl files eliminated
+- [x] **Phase 13: BM25 Retriever Swap** — HybridRetriever queries FTS5; pkl files eliminated (completed 2026-03-01)
 - [ ] **Phase 14: Embedding Cache Migration** — SQLite embedding_cache replaces DiskCache
 
 ## Phase Details
@@ -123,5 +123,5 @@ Plans:
 | 10. Config Consolidation and Verification | v1.2 | 2/2 | Complete | 2026-02-26 |
 | 11. SQLite Schema and DB Init | 1/1 | Complete    | 2026-02-27 | — |
 | 12. Indexer Integration | 1/1 | Complete    | 2026-02-27 | — |
-| 13. BM25 Retriever Swap | 1/2 | In Progress|  | — |
+| 13. BM25 Retriever Swap | 2/2 | Complete   | 2026-03-01 | — |
 | 14. Embedding Cache Migration | v1.3 | 0/? | Not started | — |

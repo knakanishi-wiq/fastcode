@@ -10,13 +10,13 @@ See: .planning/PROJECT.md (updated 2026-02-27)
 ## Current Position
 
 Phase: 13 — BM25 Retriever Swap
-Plan: 01 (Complete)
-Status: Phase 13 Plan 01 complete — ready for Plan 02
-Last activity: 2026-03-02 — Phase 13 Plan 01 complete; full_bm25() FTS5 method + _keyword_search() updated, BM25-01/BM25-02 done
+Plan: 02 (Complete)
+Status: Phase 13 complete — BM25 Retriever Swap done (BM25-01, BM25-02, BM25-03)
+Last activity: 2026-03-02 — Phase 13 Plan 02 complete; pkl BM25 methods deleted, rank-bm25 dep removed, _simple_bm25_scores added
 
 ```
-Progress: Phases 1–12 complete ██████████████████████░░░░░░░ 82% (12/14)
-v1.3:     Phase 11 ████ Phase 12 ████ Phase 13 ░░░░ Phase 14 ░░░░
+Progress: Phases 1–13 complete ████████████████████████░░░░░ 86% (13/14)
+v1.3:     Phase 11 ████ Phase 12 ████ Phase 13 ████ Phase 14 ░░░░
 ```
 
 ## Performance Metrics
@@ -46,6 +46,7 @@ v1.3:     Phase 11 ████ Phase 12 ████ Phase 13 ░░░░ Phas
 | Phase 11-sqlite-schema-and-db-init P01 | 2 | 2 tasks | 2 files |
 | Phase 12-indexer-integration P01 | 4 | 3 tasks | 2 files |
 | Phase 13-bm25-retriever-swap P01 | 6 | 2 tasks | 2 files |
+| Phase 13-bm25-retriever-swap P02 | 5 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,8 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [Phase 13-bm25-retriever-swap P01]: full_bm25() is a method not an attribute; removed BM25Okapi attrs (self.full_bm25, filtered_bm25, their corpus lists) from __init__; element lists kept
 - [Phase 13-bm25-retriever-swap P01]: score=1.0 placeholder in _keyword_search() — FTS5 rank ordering preserved, normalized score not available
 - [Phase 13-bm25-retriever-swap P01]: _keyword_search() uses repo_filter[0] as source_path prefix when provided; empty string = match all
+- [Phase 13]: Replace BM25Okapi repo-overview scoring with _simple_bm25_scores (TF sum); adequate for <20 repos
+- [Phase 13]: repo_overview_bm25=True sentinel; is-not-None guard still works correctly
 
 ### v1.3 Context
 
@@ -103,5 +106,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 13-01-PLAN.md — full_bm25() via FTS5 + _keyword_search() update (BM25-01, BM25-02), tests/test_retriever_bm25.py (6 tests)
+Stopped at: Completed 13-02-PLAN.md — pkl BM25 infrastructure removed, rank-bm25 dep dropped (BM25-03)
 Resume file: None
