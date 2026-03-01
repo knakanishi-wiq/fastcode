@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 12: Indexer SQLite Integration)
+**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 13: BM25 Retriever Swap)
 
 ## Current Position
 
-Phase: 12 — Indexer SQLite Integration
+Phase: 13 — BM25 Retriever Swap
 Plan: 01 (Complete)
-Status: Phase 12 Plan 01 complete — ready for Phase 13
-Last activity: 2026-02-27 — Phase 12 Plan 01 complete; index_repo() with SQLite change detection, IDX-01/IDX-02 done
+Status: Phase 13 Plan 01 complete — ready for Plan 02
+Last activity: 2026-03-02 — Phase 13 Plan 01 complete; full_bm25() FTS5 method + _keyword_search() updated, BM25-01/BM25-02 done
 
 ```
 Progress: Phases 1–12 complete ██████████████████████░░░░░░░ 82% (12/14)
@@ -45,6 +45,7 @@ v1.3:     Phase 11 ████ Phase 12 ████ Phase 13 ░░░░ Phas
 *Updated after each plan completion*
 | Phase 11-sqlite-schema-and-db-init P01 | 2 | 2 tasks | 2 files |
 | Phase 12-indexer-integration P01 | 4 | 3 tasks | 2 files |
+| Phase 13-bm25-retriever-swap P01 | 6 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 - [Phase 11-sqlite-schema-and-db-init]: WAL mode omitted — single-process CLI tool; no concurrent readers
 - [Phase 12-indexer-integration]: Skip files where parse_result.language=='unknown' (CodeParser never returns None for unknown extensions)
 - [Phase 12-indexer-integration]: Use pathspec 'gitignore' pattern (not deprecated 'gitwildmatch') for .gitignore parsing
+- [Phase 13-bm25-retriever-swap P01]: full_bm25() is a method not an attribute; removed BM25Okapi attrs (self.full_bm25, filtered_bm25, their corpus lists) from __init__; element lists kept
+- [Phase 13-bm25-retriever-swap P01]: score=1.0 placeholder in _keyword_search() — FTS5 rank ordering preserved, normalized score not available
+- [Phase 13-bm25-retriever-swap P01]: _keyword_search() uses repo_filter[0] as source_path prefix when provided; empty string = match all
 
 ### v1.3 Context
 
@@ -98,6 +102,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Completed 12-01-PLAN.md — index_repo() with SQLite change detection (IDX-01, IDX-02), tests/test_indexer_sqlite.py (8 tests)
+Last session: 2026-03-02
+Stopped at: Completed 13-01-PLAN.md — full_bm25() via FTS5 + _keyword_search() update (BM25-01, BM25-02), tests/test_retriever_bm25.py (6 tests)
 Resume file: None
