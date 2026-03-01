@@ -2,7 +2,7 @@
 
 ## What This Is
 
-FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely. v1.2 modernized the packaging system (pyproject.toml + uv.lock + uv Dockerfile) and closed all remaining v1.1 tech debt: dead code removed, task_type explicit at all call sites, env var config unified, and live smoke tests confirmed API behavior.
+FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely. v1.2 modernized the packaging system (pyproject.toml + uv.lock + uv Dockerfile) and closed all remaining v1.1 tech debt. v1.3 (in progress) replaces the pkl/rank_bm25 BM25 backend with SQLite FTS5: repository chunks are now persisted in a `chunks` table, trigger-maintained FTS5 index provides disk-backed BM25 search, and `rank-bm25` is removed from the dependency tree.
 
 ## Core Value
 
@@ -41,14 +41,18 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 
 ### Active
 
-<!-- v1.3: SQLite FTS5 BM25 Migration -->
+<!-- v1.3: SQLite FTS5 BM25 Migration — Phase 14 remaining -->
 
-- [ ] Replace `rank_bm25` (BM25Okapi, in-memory) with SQLite FTS5 virtual table as the BM25 backend
-- [ ] Persist chunk corpus in a SQLite `chunks` table (replaces pkl serialization)
-- [ ] Trigger-maintained FTS5 index kept in sync with `chunks` on insert/delete/update
-- [ ] Migrate embedding cache from DiskCache to a SQLite `embedding_cache` table (keyed on content hash + model)
-- [ ] `HybridRetriever` BM25 path calls FTS5 instead of `rank_bm25`; FAISS path unchanged
-- [ ] Existing FAISS index files remain; SQLite DB stored alongside in `./data/`
+- [ ] Migrate embedding cache from DiskCache to a SQLite `embedding_cache` table (keyed on content hash + model) — Phase 14
+
+### Validated (v1.3 partial)
+
+- ✓ Replace `rank_bm25` (BM25Okapi, in-memory) with SQLite FTS5 virtual table as the BM25 backend — Phase 13 (BM25-01)
+- ✓ Persist chunk corpus in a SQLite `chunks` table (replaces pkl serialization) — Phase 12 (IDX-01)
+- ✓ Trigger-maintained FTS5 index kept in sync with `chunks` on insert/delete/update — Phase 11 (STOR-03)
+- ✓ `HybridRetriever` BM25 path calls FTS5 instead of `rank_bm25`; FAISS path unchanged — Phase 13 (BM25-02)
+- ✓ Existing FAISS index files remain; SQLite DB stored alongside in `./data/` — Phase 12
+- ✓ `rank-bm25` removed from dependencies; no pkl files written or read — Phase 13 (BM25-03)
 
 ### Out of Scope
 
@@ -110,6 +114,10 @@ All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python
 | `uv sync --locked` in Dockerfile (not `--frozen`) | `--locked` errors if lockfile is out of date; `--frozen` silently uses whatever is on disk | ✓ Good — stricter reproducibility; catches drift between pyproject.toml and uv.lock |
 | PEP 735 `[dependency-groups]` for dev isolation | Alternative to `[project.optional-dependencies]`; uv-native; excludable with `UV_NO_DEV=1` | ✓ Good — clean separation; production image verified pytest-free |
 | Remove `MODEL` env var entirely (not alias/deprecate) | Aliasing preserves the confusion; clean break with migration note is clearer | ✓ Good — `.env.example` migration note documents the change for upgraders |
+| `full_bm25()` as method not attribute; removed `self.full_bm25` BM25Okapi attr | Avoids name collision between method and old instance attribute | ✓ Good — Phase 13 (P01); auto-fixed BM25Okapi assignments in index_for_bm25/load_bm25 |
+| `score=1.0` placeholder in `_keyword_search()` | FTS5 rank used for ordering; normalized float score not needed | ✓ Good — Phase 13 (P01); ordering correctness preserved via ORDER BY fts.rank |
+| `_simple_bm25_scores` TF sum for repo overview (not BM25Okapi) | Corpus is <20 repos; IDF component irrelevant at this scale; removes external dep | ✓ Good — Phase 13 (P02); rank-bm25 removed from pyproject.toml |
+| `repo_overview_bm25 = True` sentinel after build | Existing `is not None` guard treats True as truthy; no conditional code change needed | ✓ Good — Phase 13 (P02); clean drop-in replacement |
 
 ## Current Milestone: v1.3 SQLite FTS5 BM25 Migration
 
@@ -122,4 +130,4 @@ All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python
 - FAISS vector index unchanged
 
 ---
-*Last updated: 2026-02-27 after v1.3 milestone start*
+*Last updated: 2026-03-02 after Phase 13*

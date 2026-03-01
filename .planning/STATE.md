@@ -2,10 +2,10 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-27)
+See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** All LLM and embedding calls in FastCode route through litellm, enabling full VertexAI on GCP via ADC without provider-specific client code.
-**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 13: BM25 Retriever Swap)
+**Current focus:** v1.3 — SQLite FTS5 BM25 Migration (Phase 14: Embedding Cache Migration)
 
 ## Current Position
 
@@ -81,19 +81,20 @@ Recent decisions affecting v1.2 (full log in PROJECT.md Key Decisions):
 
 ### v1.3 Context
 
-**Key files for this milestone:**
-- `fastcode/retriever.py` — `HybridRetriever.full_bm25()` uses `rank_bm25.BM25Okapi`; pkl at `./data/{repo_name}_bm25.pkl`
-- `fastcode/indexer.py` — builds BM25 index (pkl) and FAISS index during indexing
-- `fastcode/embedder.py` — `CodeEmbedder` calls `litellm.embedding()`; uses DiskCache for embedding caching
-- `fastcode/vector_store.py` — manages FAISS index; FAISS stays unchanged in v1.3
+**Key files for Phase 14:**
+- `fastcode/embedder.py` — `CodeEmbedder` calls `litellm.embedding()`; currently uses DiskCache for embedding caching (target: SQLite `embedding_cache` table)
+- `fastcode/db.py` — SQLite schema init (chunks, sources, chunks_fts); Phase 14 will add `embedding_cache` table here
+- `fastcode/retriever.py` — `full_bm25()` now queries FTS5 directly (Phase 13 complete); FAISS path unchanged
 
-**Architecture decisions resolved (Phase 11):**
-- DB init location: `fastcode/db.py` module (resolved)
-- FTS5 content-linked table (content=chunks) chosen for retriever convenience
+**Architecture decisions resolved:**
+- DB init location: `fastcode/db.py` module (Phase 11)
+- FTS5 content-linked table (content=chunks) chosen for retriever convenience (Phase 11)
+- SQLite DB path: single `./data/fastcode.db` (Phase 12)
+- BM25 path: FTS5-only, no pkl, no rank-bm25 (Phase 13)
 
-**Architecture decisions pending:**
-- SQLite DB file path: likely `./data/{repo_name}.db` or a single `./data/fastcode.db` (Phase 12)
-- EMB-01/EMB-02 (Phase 14) depends on Phase 11 schema but is independent of Phases 12-13
+**Phase 14 context:**
+- EMB-01/EMB-02: `embedding_cache` table keyed on `(content_hash, model)`; replaces DiskCache
+- Depends on Phase 11 schema only (independent of Phases 12-13)
 
 ### Pending Todos
 
@@ -106,5 +107,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 13-02-PLAN.md — pkl BM25 infrastructure removed, rank-bm25 dep dropped (BM25-03)
+Stopped at: Phase 13 complete, transition done — ready to plan Phase 14
 Resume file: None
