@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Set, Tuple, Optional, Union
 import numpy as np
 from rank_bm25 import BM25Okapi
 
+from .db import init_db
 from .vector_store import VectorStore
 from .embedder import CodeEmbedder
 from .graph_builder import CodeGraphBuilder
@@ -56,18 +57,14 @@ class HybridRetriever:
         self.enable_agency_mode = self.retrieval_config.get("enable_agency_mode", True)
         
         # Full indexes (for repository selection - never cleared)
-        self.full_bm25 = None
-        self.full_bm25_corpus = []
         self.full_bm25_elements = []
-        
+
         # Separate BM25 index for repository overviews
         self.repo_overview_bm25 = None
         self.repo_overview_bm25_corpus = []
         self.repo_overview_names = []  # List of repo names corresponding to corpus
-        
+
         # Filtered indexes (for actual retrieval after repo selection)
-        self.filtered_bm25 = None
-        self.filtered_bm25_corpus = []
         self.filtered_bm25_elements = []
         
         # Filtered vector store for selected repositories
@@ -90,7 +87,11 @@ class HybridRetriever:
         # Persistence
         self.persist_dir = config.get("vector_store", {}).get("persist_directory", "./data/vector_store")
         ensure_dir(self.persist_dir)
-        
+
+        # SQLite connection for FTS5-backed BM25 retrieval
+        db_path = config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+        self._db_conn = init_db(db_path)
+
         # Track currently loaded repositories for filtering
         self.current_loaded_repos = None  # None means all repos loaded, List means specific repos
     
@@ -137,8 +138,8 @@ class HybridRetriever:
             tokens = text.lower().split()
             self.full_bm25_corpus.append(tokens)
         
-        self.full_bm25 = BM25Okapi(self.full_bm25_corpus)
-        self.logger.info(f"Built full BM25 index with {len(self.full_bm25_corpus)} documents")
+        # BM25Okapi index removed; full_bm25() now queries FTS5 directly (Plan 13)
+        self.logger.info(f"Built full BM25 elements list with {len(self.full_bm25_corpus)} documents")
     
     def build_repo_overview_bm25(self):
         """
@@ -180,7 +181,38 @@ class HybridRetriever:
         
         self.repo_overview_bm25 = BM25Okapi(self.repo_overview_bm25_corpus)
         self.logger.info(f"Built repo overview BM25 index with {len(self.repo_overview_bm25_corpus)} repositories")
-    
+
+    def full_bm25(self, query: str, repo_path: str = "", top_k: int = 10) -> list:
+        """Query chunks_fts for BM25-ranked results optionally scoped to repo_path.
+
+        Args:
+            query: Raw search string for FTS5 MATCH.
+            repo_path: Relative path prefix; only chunks whose source_path starts
+                with this prefix are returned. Empty string matches all chunks.
+            top_k: Maximum results to return.
+
+        Returns:
+            List of dicts with chunk fields: id, source_path, content,
+            content_hash, chunk_index, start_offset, end_offset.
+        """
+        like_pattern = (repo_path.rstrip("/") + "/%") if repo_path else "%"
+        rows = self._db_conn.execute(
+            """
+            SELECT c.id, c.source_path, c.content,
+                   c.content_hash, c.chunk_index, c.start_offset, c.end_offset
+            FROM   chunks_fts fts
+            JOIN   chunks c ON fts.rowid = c.id
+            WHERE  chunks_fts MATCH ?
+              AND  c.source_path LIKE ?
+            ORDER  BY fts.rank
+            LIMIT  ?
+            """,
+            (query, like_pattern, top_k),
+        ).fetchall()
+        keys = ("id", "source_path", "content",
+                "content_hash", "chunk_index", "start_offset", "end_offset")
+        return [dict(zip(keys, row)) for row in rows]
+
     def retrieve(self, query: Union[str, ProcessedQuery], filters: Optional[Dict[str, Any]] = None,
                  repo_filter: Optional[List[str]] = None, enable_file_selection: bool = True,
                  use_agency_mode: Optional[bool] = None,
@@ -770,69 +802,24 @@ class HybridRetriever:
         
         return results
     
-    def _keyword_search(self, query: str, top_k: int = 10, 
+    def _keyword_search(self, query: str, top_k: int = 10,
                         repo_filter: Optional[List[str]] = None) -> List[Tuple[Dict[str, Any], float]]:
+        """Keyword search using SQLite FTS5 BM25.
+
+        Args:
+            query: Search string passed directly to FTS5 MATCH.
+            top_k: Maximum results.
+            repo_filter: Optional list of repo name prefixes to scope results.
+                Uses first element as source_path prefix filter; empty/None = all.
+
+        Returns:
+            List of (chunk_dict, score) tuples; score is 1.0 (FTS5 rank used for ordering,
+            not exposed as normalized float).
         """
-        Keyword search using BM25
-        Uses filtered_bm25 if available, otherwise uses full_bm25
-        """
-        # Choose which BM25 index to use
-        if self.filtered_bm25 is not None and len(self.filtered_bm25_elements) > 0:
-            # Use filtered BM25
-            bm25_index = self.filtered_bm25
-            bm25_elements = self.filtered_bm25_elements
-            # CRITICAL FIX: Always apply repo_filter check for safety, even with filtered index
-            use_filter = bool(repo_filter)
-            self.logger.debug("Using filtered BM25 index")
-        elif self.full_bm25 is not None:
-            # Use full BM25
-            bm25_index = self.full_bm25
-            bm25_elements = self.full_bm25_elements
-            use_filter = bool(repo_filter)
-            self.logger.debug("Using full BM25 index")
-        else:
-            return []
-        
-        # Tokenize query
-        query_tokens = query.lower().split()
-        
-        # Get BM25 scores
-        scores = bm25_index.get_scores(query_tokens)
-        
-        # Get top-k results with more candidates for filtering
-        search_limit = top_k * 3 if use_filter else top_k
-        top_indices = np.argsort(scores)[::-1][:min(search_limit, len(scores))]
-        
-        results = []
-        filtered_count = 0
-        
-        for idx in top_indices:
-            score = scores[idx]
-            if score > 0:  # Only include non-zero scores
-                elem = bm25_elements[idx]
-                
-                # CRITICAL: Always apply repository filter when repo_filter is provided
-                if use_filter and elem.repo_name not in repo_filter:
-                    filtered_count += 1
-                    if filtered_count <= 3:  # Log first few for debugging
-                        self.logger.warning(
-                            f"BM25 search filtered out element from unexpected repo: {elem.repo_name} "
-                            f"(expected: {repo_filter}). Element: {elem.name}"
-                        )
-                    continue
-                
-                metadata = elem.to_dict()
-                results.append((metadata, float(score)))
-                
-                # Stop if we have enough results
-                if len(results) >= top_k:
-                    break
-        
-        if filtered_count > 0:
-            self.logger.info(f"BM25 search filtered out {filtered_count} elements from unexpected repos")
-        
-        self.logger.debug(f"Keyword search found {len(results)} results")
-        return results
+        repo_path = repo_filter[0] if repo_filter else ""
+        chunks = self.full_bm25(query, repo_path=repo_path, top_k=top_k)
+        self.logger.debug(f"Keyword search found {len(chunks)} results")
+        return [(chunk, 1.0) for chunk in chunks]
     
     def _combine_results(self, semantic_results: List[Tuple[Dict[str, Any], float]],
                          keyword_results: List[Tuple[Dict[str, Any], float]],
@@ -1277,7 +1264,7 @@ class HybridRetriever:
             
             # Rebuild FULL BM25 index from corpus
             if self.full_bm25_corpus:
-                self.full_bm25 = BM25Okapi(self.full_bm25_corpus)
+                # BM25Okapi index removed; full_bm25() now queries FTS5 directly (Plan 13)
                 self.logger.info(f"Loaded full BM25 data with {len(self.full_bm25_elements)} elements")
             else:
                 self.logger.warning("BM25 corpus is empty")
