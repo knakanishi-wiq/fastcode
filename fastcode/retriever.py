@@ -4,11 +4,9 @@ Enhanced with LLM-processed query support
 """
 
 import os
-import pickle
 import logging
 from typing import List, Dict, Any, Set, Tuple, Optional, Union
 import numpy as np
-from rank_bm25 import BM25Okapi
 
 from .db import init_db
 from .vector_store import VectorStore
@@ -60,7 +58,6 @@ class HybridRetriever:
         self.full_bm25_elements = []
 
         # Separate BM25 index for repository overviews
-        self.repo_overview_bm25 = None
         self.repo_overview_bm25_corpus = []
         self.repo_overview_names = []  # List of repo names corresponding to corpus
 
@@ -95,74 +92,44 @@ class HybridRetriever:
         # Track currently loaded repositories for filtering
         self.current_loaded_repos = None  # None means all repos loaded, List means specific repos
     
-    def index_for_bm25(self, elements: List[CodeElement]):
-        """
-        Build full BM25 index for keyword search (excludes repository overviews)
-        
+    def _simple_bm25_scores(self, corpus: List[List[str]], query_tokens: List[str]) -> List[float]:
+        """Compute term-frequency scores for a small corpus.
+
+        Uses simple TF sum (count of query tokens present in each document).
+        Adequate for tiny repo-overview corpora (<20 repos).
+
         Args:
-            elements: List of code elements (without repository_overview type)
+            corpus: List of tokenized documents.
+            query_tokens: Tokenized query.
+
+        Returns:
+            List of float scores, one per document (higher = more relevant).
         """
-        self.logger.info("Building full BM25 index for keyword search")
-        
-        self.full_bm25_elements = elements
-        self.full_bm25_corpus = []
-        
-        for elem in elements:
-            # Skip repository_overview elements if any (they should be in separate storage)
-            if elem.type == "repository_overview":
-                continue
-            
-            # Combine different text fields for indexing
-            text_parts = [
-                elem.name,
-                elem.type,
-                elem.language,
-                elem.relative_path,
-            ]
-            
-            if elem.docstring:
-                text_parts.append(elem.docstring)
-            
-            if elem.signature:
-                text_parts.append(elem.signature)
-            
-            if elem.summary:
-                text_parts.append(elem.summary)
-            
-            # Add some code content
-            if elem.code:
-                text_parts.append(elem.code[:1000])  # First 1000 chars
-            
-            text = " ".join(text_parts)
-            # Tokenize (simple whitespace tokenization)
-            tokens = text.lower().split()
-            self.full_bm25_corpus.append(tokens)
-        
-        # BM25Okapi index removed; full_bm25() now queries FTS5 directly (Plan 13)
-        self.logger.info(f"Built full BM25 elements list with {len(self.full_bm25_corpus)} documents")
-    
+        query_set = set(query_tokens)
+        return [sum(1 for t in doc if t in query_set) for doc in corpus]
+
     def build_repo_overview_bm25(self):
         """
         Build separate BM25 index for repository overviews
         Uses the separate repo overview storage from vector_store
         """
         self.logger.info("Building BM25 index for repository overviews")
-        
+
         # Load repo overviews from separate storage
         repo_overviews = self.vector_store.load_repo_overviews()
-        
+
         if not repo_overviews:
             self.logger.warning("No repository overviews found for BM25 indexing")
             return
-        
+
         self.repo_overview_bm25_corpus = []
         self.repo_overview_names = []
-        
+
         for repo_name, overview_data in repo_overviews.items():
             # Get text content for BM25
             content = overview_data.get("content", "")
             metadata = overview_data.get("metadata", {})
-            
+
             # Combine all text
             readme = metadata.get("readme_content")
             text_parts = [
@@ -172,14 +139,14 @@ class HybridRetriever:
                 metadata.get("structure_text", ""),
                 (readme if readme else "")[:1000]  # 确保是字符串
             ]
-            
+
             text = " ".join(text_parts)
             tokens = text.lower().split()
-            
+
             self.repo_overview_bm25_corpus.append(tokens)
             self.repo_overview_names.append(repo_name)
-        
-        self.repo_overview_bm25 = BM25Okapi(self.repo_overview_bm25_corpus)
+
+        self.repo_overview_bm25 = True  # Sentinel: corpus is ready; scoring via _simple_bm25_scores
         self.logger.info(f"Built repo overview BM25 index with {len(self.repo_overview_bm25_corpus)} repositories")
 
     def full_bm25(self, query: str, repo_path: str = "", top_k: int = 10) -> list:
@@ -464,7 +431,7 @@ class HybridRetriever:
                     query_tokens.extend(part.lower().split())
             else:
                 query_tokens = query.lower().split()
-            scores = self.repo_overview_bm25.get_scores(query_tokens)
+            scores = self._simple_bm25_scores(self.repo_overview_bm25_corpus, query_tokens)
             # Get repository overview results from separate index
             for idx, score in enumerate(scores):
                 if idx < len(self.repo_overview_names) and score > 0:
@@ -1148,37 +1115,8 @@ class HybridRetriever:
                 self.logger.error("Failed to load any repository vector indexes")
                 return False
             
-            # Reload BM25 indexes for specific repositories into FILTERED indexes
-            all_bm25_elements = []
-            all_bm25_corpus = []
-            
-            for repo_name in repo_names:
-                bm25_path = os.path.join(self.persist_dir, f"{repo_name}_bm25.pkl")
-                if os.path.exists(bm25_path):
-                    try:
-                        with open(bm25_path, 'rb') as f:
-                            data = pickle.load(f)
-                            all_bm25_corpus.extend(data["bm25_corpus"])
-                            
-                            # Reconstruct CodeElement objects
-                            for elem_dict in data["bm25_elements"]:
-                                all_bm25_elements.append(CodeElement(**elem_dict))
-                        
-                        self.logger.info(f"Loaded BM25 index for {repo_name}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load BM25 index for {repo_name}: {e}")
-                else:
-                    self.logger.warning(f"BM25 index not found for {repo_name}")
-            
-            # Rebuild FILTERED BM25 with selected repositories
-            if all_bm25_elements and all_bm25_corpus:
-                self.filtered_bm25_elements = all_bm25_elements
-                self.filtered_bm25_corpus = all_bm25_corpus
-                self.filtered_bm25 = BM25Okapi(all_bm25_corpus)
-                self.logger.info(f"Rebuilt filtered BM25 index with {len(all_bm25_elements)} elements")
-            else:
-                self.logger.warning("No BM25 data found for the specified repositories")
-            
+            self.logger.info("BM25 scoping is now handled by FTS5 source_path filtering in full_bm25()")
+
             # Optionally reload graph data (if needed)
             # Note: Graph reloading is commented out since it might not be necessary for all use cases
             # Uncomment if graph data needs to be reloaded as well
@@ -1211,68 +1149,6 @@ class HybridRetriever:
             self.logger.error(f"Failed to reload specific repositories: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
-            return False
-    
-    def save_bm25(self, name: str = "index"):
-        """
-        Save FULL BM25 index and elements to disk
-        
-        Args:
-            name: Name for the saved files
-        """
-        bm25_path = os.path.join(self.persist_dir, f"{name}_bm25.pkl")
-        
-        try:
-            with open(bm25_path, 'wb') as f:
-                pickle.dump({
-                    "bm25_corpus": self.full_bm25_corpus,
-                    "bm25_elements": [elem.to_dict() for elem in self.full_bm25_elements],
-                }, f)
-            
-            self.logger.info(f"Saved full BM25 data to {bm25_path}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save BM25 data: {e}")
-            return False
-    
-    def load_bm25(self, name: str = "index") -> bool:
-        """
-        Load FULL BM25 index and elements from disk
-        
-        Args:
-            name: Name of the saved files
-        
-        Returns:
-            True if successful, False otherwise
-        """
-        bm25_path = os.path.join(self.persist_dir, f"{name}_bm25.pkl")
-        
-        if not os.path.exists(bm25_path):
-            self.logger.warning(f"BM25 data not found: {bm25_path}")
-            return False
-        
-        try:
-            with open(bm25_path, 'rb') as f:
-                data = pickle.load(f)
-                self.full_bm25_corpus = data["bm25_corpus"]
-                
-                # Reconstruct CodeElement objects
-                self.full_bm25_elements = []
-                for elem_dict in data["bm25_elements"]:
-                    self.full_bm25_elements.append(CodeElement(**elem_dict))
-            
-            # Rebuild FULL BM25 index from corpus
-            if self.full_bm25_corpus:
-                # BM25Okapi index removed; full_bm25() now queries FTS5 directly (Plan 13)
-                self.logger.info(f"Loaded full BM25 data with {len(self.full_bm25_elements)} elements")
-            else:
-                self.logger.warning("BM25 corpus is empty")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load BM25 data: {e}")
             return False
     
     def _initialize_agents(self, repo_root: str) -> bool:
