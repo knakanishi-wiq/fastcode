@@ -123,5 +123,5 @@ Plans:
 | 10. Config Consolidation and Verification | v1.2 | 2/2 | Complete | 2026-02-26 |
 | 11. SQLite Schema and DB Init | 1/1 | Complete    | 2026-02-27 | — |
 | 12. Indexer Integration | 1/1 | Complete    | 2026-02-27 | — |
-| 13. BM25 Retriever Swap | 2/2 | Complete   | 2026-03-01 | — |
+| 13. BM25 Retriever Swap | 2/2 | Complete    | 2026-03-01 | — |
 | 14. Embedding Cache Migration | v1.3 | 0/? | Not started | — |
