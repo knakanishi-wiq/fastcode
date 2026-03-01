@@ -93,7 +93,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 13-01-PLAN.md — TDD: FTS5-backed _keyword_search with repo scoping (BM25-01, BM25-02)
+- [ ] 13-01-PLAN.md — TDD: full_bm25() method + _keyword_search() update via FTS5 (BM25-01, BM25-02)
 - [ ] 13-02-PLAN.md — Remove pkl BM25 infrastructure and rank-bm25 dependency (BM25-03)
 
 ### Phase 14: Embedding Cache Migration
