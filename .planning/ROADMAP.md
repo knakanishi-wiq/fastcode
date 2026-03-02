@@ -105,7 +105,11 @@ Plans:
   2. Embedding a chunk that is already in the cache returns the stored embedding without making a `litellm.embedding()` API call
   3. Embedding a chunk not in the cache calls `litellm.embedding()`, stores the result in `embedding_cache`, and returns the embedding
   4. After a full index run, re-running the indexer on the same unchanged repository makes zero `litellm.embedding()` calls (all served from cache)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 14-01-PLAN.md — TDD: embedding_cache DDL + CodeEmbedder cache logic in embed_text() (EMB-01, EMB-02)
+- [ ] 14-02-PLAN.md — Remove diskcache dep, add --clear-cache CLI flag, update README
 
 ## Progress
 
