@@ -143,21 +143,34 @@ def query(repo_url, repo_path, repo_zip, query, config, output, verbose, load_ca
 @click.option('--repo-path', '-p', help='Local repository path')
 @click.option('--repo-zip', '-z', help='ZIP file containing repository')
 @click.option('--config', '-c', help='Path to configuration file')
-def index(repo_url, repo_path, repo_zip, config):
+@click.option('--clear-cache', is_flag=True, help='Truncate embedding_cache table before indexing')
+def index(repo_url, repo_path, repo_zip, config, clear_cache):
     """Index a repository (without querying)"""
-    
+
     if not repo_url and not repo_path and not repo_zip:
         click.echo("Error: Either --repo-url, --repo-path, or --repo-zip must be provided", err=True)
         sys.exit(1)
-    
+
     # Check for conflicting options
     provided_options = sum([bool(repo_url), bool(repo_path), bool(repo_zip)])
     if provided_options > 1:
         click.echo("Error: Only one of --repo-url, --repo-path, or --repo-zip can be specified", err=True)
         sys.exit(1)
-    
+
     fastcode = FastCode(config_path=config)
-    
+
+    if clear_cache:
+        import sqlite3 as _sqlite3
+        db_path = fastcode.config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+        try:
+            _conn = _sqlite3.connect(db_path)
+            _conn.execute("DELETE FROM embedding_cache")
+            _conn.commit()
+            _conn.close()
+            click.echo("Embedding cache cleared.")
+        except Exception as e:
+            click.echo(f"Warning: could not clear embedding cache: {e}", err=True)
+
     try:
         # Load repository
         if repo_zip:
