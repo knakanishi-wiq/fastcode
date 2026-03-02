@@ -120,7 +120,7 @@ class CacheManager:
         """Clear all cache"""
         if not self.enabled or self.cache is None:
             return False
-        
+
         try:
             if self.backend == "redis":
                 self.cache.flushdb()
@@ -128,6 +128,21 @@ class CacheManager:
                 return True
         except Exception as e:
             self.logger.error(f"Cache clear error: {e}")
+            return False
+
+    def clear_embedding_cache(self) -> bool:
+        """Truncate the SQLite embedding_cache table."""
+        import sqlite3
+        db_path = self.config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("DELETE FROM embedding_cache")
+            conn.commit()
+            conn.close()
+            self.logger.info("Cleared embedding cache")
+            return True
+        except Exception as e:
+            self.logger.error(f"Embedding cache clear error: {e}")
             return False
     
     def get_query_result(self, query: str, repo_hash: str) -> Optional[Any]:

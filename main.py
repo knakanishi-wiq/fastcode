@@ -162,16 +162,10 @@ def index(repo_url, repo_path, repo_zip, config, clear_cache):
     fastcode = FastCode(config_path=config)
 
     if clear_cache:
-        import sqlite3 as _sqlite3
-        db_path = fastcode.config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
-        try:
-            _conn = _sqlite3.connect(db_path)
-            _conn.execute("DELETE FROM embedding_cache")
-            _conn.commit()
-            _conn.close()
+        if fastcode.cache_manager.clear_embedding_cache():
             click.echo("Embedding cache cleared.")
-        except Exception as e:
-            click.echo(f"Warning: could not clear embedding cache: {e}", err=True)
+        else:
+            click.echo("Warning: could not clear embedding cache", err=True)
 
     try:
         # Load repository
