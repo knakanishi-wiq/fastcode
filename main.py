@@ -426,11 +426,16 @@ def interactive(repo_url, repo_path, repo_zip, config, load_cache, repos, multi_
 def clear_cache():
     """Clear all cached data"""
     fastcode = FastCode()
-    
-    if fastcode.cache_manager.clear():
-        click.echo("Cache cleared successfully")
+
+    if fastcode.cache_manager.clear_embedding_cache():
+        click.echo("Embedding cache cleared successfully")
     else:
-        click.echo("Failed to clear cache or cache is disabled")
+        click.echo("Failed to clear embedding cache")
+
+    if fastcode.cache_manager.clear():
+        click.echo("Query result cache cleared successfully")
+    else:
+        click.echo("Failed to clear query result cache or cache is disabled")
 
 
 @cli.command()

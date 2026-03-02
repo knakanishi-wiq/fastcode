@@ -81,28 +81,29 @@ class FastCode:
         self.module_resolver = None
         self.symbol_resolver = None
         
+        # CacheManager first — embedder and retriever share its SQLite connection.
+        self.cache_manager = CacheManager(self.config)
+
         # Initialize components
         self.loader = RepositoryLoader(self.config)
         self.parser = CodeParser(self.config)
-        self.embedder = CodeEmbedder(self.config)
+        self.embedder = CodeEmbedder(self.config, cache_manager=self.cache_manager)
         self.vector_store = VectorStore(self.config)
         self.indexer = CodeIndexer(self.config, self.loader, self.parser, self.embedder, self.vector_store)
         self.graph_builder = CodeGraphBuilder(self.config)
-        
+
         # Get repo_root from config if available
         config_repo_root = self.config.get("repo_root")
         config_repo_root = os.path.abspath(config_repo_root)
         ensure_dir(config_repo_root)
         self.logger.info(f"Configured repo_root: {config_repo_root}")
-        
+
         self.retriever = HybridRetriever(self.config, self.vector_store,
                                          self.embedder, self.graph_builder,
-                                         repo_root=config_repo_root)
-        # Wire retriever's DB connection into embedder for embedding_cache lookups.
-        self.embedder._db_conn = self.retriever._db_conn
+                                         repo_root=config_repo_root,
+                                         db_conn=self.cache_manager._db_conn)
         self.query_processor = QueryProcessor(self.config)
         self.answer_generator = AnswerGenerator(self.config)
-        self.cache_manager = CacheManager(self.config)
         
         # State
         self.repo_loaded = False

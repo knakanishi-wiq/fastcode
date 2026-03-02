@@ -5,6 +5,7 @@ Enhanced with LLM-processed query support
 
 import os
 import logging
+import sqlite3
 from typing import List, Dict, Any, Set, Tuple, Optional, Union
 import numpy as np
 
@@ -24,7 +25,8 @@ class HybridRetriever:
     
     def __init__(self, config: Dict[str, Any], vector_store: VectorStore,
                  embedder: CodeEmbedder, graph_builder: CodeGraphBuilder,
-                 repo_root: Optional[str] = None):
+                 repo_root: Optional[str] = None,
+                 db_conn: Optional[sqlite3.Connection] = None):
         self.config = config
         self.retrieval_config = config.get("retrieval", {})
         self.logger = logging.getLogger(__name__)
@@ -85,9 +87,12 @@ class HybridRetriever:
         self.persist_dir = config.get("vector_store", {}).get("persist_directory", "./data/vector_store")
         ensure_dir(self.persist_dir)
 
-        # SQLite connection for FTS5-backed BM25 retrieval
-        db_path = config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
-        self._db_conn = init_db(db_path)
+        # SQLite connection for FTS5-backed BM25 retrieval — use shared conn if provided.
+        if db_conn is not None:
+            self._db_conn = db_conn
+        else:
+            db_path = config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+            self._db_conn = init_db(db_path)
 
         # Track currently loaded repositories for filtering
         self.current_loaded_repos = None  # None means all repos loaded, List means specific repos

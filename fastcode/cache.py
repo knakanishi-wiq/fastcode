@@ -9,6 +9,9 @@ import logging
 import json
 import time
 from typing import Any, Optional, List, Dict
+import numpy as np
+
+from .db import init_db
 
 
 class CacheManager:
@@ -27,24 +30,19 @@ class CacheManager:
         # Dialogue history TTL (default: 30 days for long-term conversation history)
         self.dialogue_ttl = self.cache_config.get("dialogue_ttl", 2592000)  # 30 days in seconds
 
+        # Always open SQLite — chunks/FTS/embedding_cache tables live here
+        # regardless of which cache backend is selected for Redis/query caching.
+        db_path = config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+        self._db_conn = init_db(db_path)
+
         self.cache = None
-        
+
         if self.enabled:
             self._initialize_cache()
     
     def _initialize_cache(self):
-        """Initialize cache backend"""
-        if self.backend == "disk":
-            # Disk backend removed in Phase 14 (diskcache dependency eliminated).
-            # Embedding cache now uses SQLite embedding_cache table in CodeEmbedder.
-            self.logger.warning(
-                "cache.backend='disk' is no longer supported. "
-                "Set backend='redis' or disable cache (enabled=false). Disabling cache."
-            )
-            self.enabled = False
-            return
-
-        elif self.backend == "redis":
+        """Initialize Redis cache backend (SQLite embedding cache uses self._db_conn)."""
+        if self.backend == "redis":
             try:
                 import redis
                 self.cache = redis.Redis(
@@ -58,10 +56,10 @@ class CacheManager:
             except Exception as e:
                 self.logger.error(f"Failed to initialize Redis cache: {e}")
                 self.enabled = False
-        
-        else:
+        elif self.backend != "disk":
             self.logger.warning(f"Unknown cache backend: {self.backend}")
             self.enabled = False
+        # disk: self.cache stays None; embedding cache uses self._db_conn
     
     def _generate_key(self, prefix: str, *args) -> str:
         """Generate cache key from arguments"""
@@ -130,16 +128,132 @@ class CacheManager:
             self.logger.error(f"Cache clear error: {e}")
             return False
 
-    def clear_embedding_cache(self) -> bool:
-        """Truncate the SQLite embedding_cache table."""
-        import sqlite3
-        db_path = self.config.get("vector_store", {}).get("db_path", "./data/fastcode.db")
+    def get_embedding(self, content_hash: str, model: str) -> Optional[np.ndarray]:
+        """Fetch a single embedding from Redis or SQLite."""
+        if self.backend == "redis" and self.cache is not None:
+            key = f"embedding_{content_hash}_{model}"
+            try:
+                data = self.cache.get(key)
+                if data is not None:
+                    return np.frombuffer(data, dtype=np.float32).copy()
+            except Exception as e:
+                self.logger.warning(f"Redis get_embedding error: {e}")
+            return None
         try:
-            conn = sqlite3.connect(db_path)
-            conn.execute("DELETE FROM embedding_cache")
-            conn.commit()
-            conn.close()
-            self.logger.info("Cleared embedding cache")
+            row = self._db_conn.execute(
+                "SELECT embedding FROM embedding_cache WHERE content_hash=? AND model=?",
+                (content_hash, model),
+            ).fetchone()
+            if row is not None:
+                return np.frombuffer(row[0], dtype=np.float32).copy()
+        except Exception as e:
+            self.logger.warning(f"SQLite get_embedding error: {e}")
+        return None
+
+    def set_embedding(self, content_hash: str, model: str, embedding: np.ndarray) -> bool:
+        """Store a single embedding in Redis or SQLite."""
+        if self.backend == "redis" and self.cache is not None:
+            key = f"embedding_{content_hash}_{model}"
+            try:
+                # No TTL — embeddings are permanent until explicitly cleared.
+                self.cache.set(key, embedding.astype(np.float32).tobytes())
+                return True
+            except Exception as e:
+                self.logger.warning(f"Redis set_embedding error: {e}")
+                return False
+        try:
+            self._db_conn.execute(
+                "INSERT OR IGNORE INTO embedding_cache (content_hash, model, embedding) VALUES (?,?,?)",
+                (content_hash, model, embedding.astype(np.float32).tobytes()),
+            )
+            self._db_conn.commit()
+            return True
+        except Exception as e:
+            self.logger.warning(f"SQLite set_embedding error: {e}")
+            return False
+
+    def get_embeddings_batch(self, content_hashes: List[str], model: str) -> Dict[str, np.ndarray]:
+        """Fetch multiple embeddings from Redis or SQLite, returning hits as a dict."""
+        result: Dict[str, np.ndarray] = {}
+        if not content_hashes:
+            return result
+
+        if self.backend == "redis" and self.cache is not None:
+            try:
+                keys = [f"embedding_{h}_{model}" for h in content_hashes]
+                values = self.cache.mget(keys)
+                for h, v in zip(content_hashes, values):
+                    if v is not None:
+                        result[h] = np.frombuffer(v, dtype=np.float32).copy()
+            except Exception as e:
+                self.logger.warning(f"Redis get_embeddings_batch error: {e}")
+            return result
+
+        # SQLite path — chunk at 900 to stay under the 999-param SQLITE_MAX_VARIABLE_NUMBER.
+        _CHUNK = 900
+        try:
+            for i in range(0, len(content_hashes), _CHUNK):
+                chunk = content_hashes[i : i + _CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = self._db_conn.execute(
+                    f"SELECT content_hash, embedding FROM embedding_cache "
+                    f"WHERE model=? AND content_hash IN ({placeholders})",
+                    [model] + chunk,
+                ).fetchall()
+                for h, blob in rows:
+                    result[h] = np.frombuffer(blob, dtype=np.float32).copy()
+        except Exception as e:
+            self.logger.warning(f"SQLite get_embeddings_batch error: {e}")
+        return result
+
+    def set_embeddings_batch(self, entries: List[Dict[str, Any]]) -> bool:
+        """Store multiple embeddings in Redis or SQLite.
+
+        Args:
+            entries: List of dicts with keys "content_hash", "model", "embedding".
+        """
+        if not entries:
+            return True
+
+        if self.backend == "redis" and self.cache is not None:
+            try:
+                pipe = self.cache.pipeline()
+                for e in entries:
+                    key = f"embedding_{e['content_hash']}_{e['model']}"
+                    pipe.set(key, e["embedding"].astype(np.float32).tobytes())
+                pipe.execute()
+                return True
+            except Exception as e:
+                self.logger.warning(f"Redis set_embeddings_batch error: {e}")
+                return False
+        try:
+            self._db_conn.executemany(
+                "INSERT OR IGNORE INTO embedding_cache (content_hash, model, embedding) VALUES (?,?,?)",
+                [(e["content_hash"], e["model"], e["embedding"].astype(np.float32).tobytes())
+                 for e in entries],
+            )
+            self._db_conn.commit()
+            return True
+        except Exception as e:
+            self.logger.warning(f"SQLite set_embeddings_batch error: {e}")
+            return False
+
+    def clear_embedding_cache(self) -> bool:
+        """Clear all cached embeddings from Redis or SQLite."""
+        if self.backend == "redis" and self.cache is not None:
+            try:
+                keys = list(self.cache.scan_iter(match="embedding_*"))
+                if keys:
+                    self.cache.delete(*keys)
+                self.logger.info("Cleared Redis embedding cache")
+                return True
+            except Exception as e:
+                self.logger.error(f"Redis embedding cache clear error: {e}")
+                return False
+        try:
+            self._db_conn.execute("DELETE FROM embedding_cache")
+            self._db_conn.commit()
+            self.logger.info("Cleared SQLite embedding cache")
             return True
         except Exception as e:
             self.logger.error(f"Embedding cache clear error: {e}")
