@@ -2,7 +2,7 @@
 
 ## What This Is
 
-FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely. v1.2 modernized the packaging system (pyproject.toml + uv.lock + uv Dockerfile) and closed all remaining v1.1 tech debt. v1.3 (in progress) replaces the pkl/rank_bm25 BM25 backend with SQLite FTS5: repository chunks are now persisted in a `chunks` table, trigger-maintained FTS5 index provides disk-backed BM25 search, and `rank-bm25` is removed from the dependency tree.
+FastCode is a code intelligence backend (RAG pipeline + agentic retrieval) that routes all LLM and embedding calls through litellm, enabling VertexAI on GCP via Application Default Credentials. v1.0 migrated all five LLM call sites to a centralized `fastcode/llm_client.py`. v1.1 completed the GCP-native story by replacing the local sentence-transformers embedding backend with VertexAI `gemini-embedding-001` via litellm — eliminating torch/sentence-transformers from the dependency tree entirely. v1.2 modernized the packaging system (pyproject.toml + uv.lock + uv Dockerfile) and closed all remaining v1.1 tech debt. v1.3 replaced the pkl/rank_bm25 BM25 backend with SQLite FTS5 and migrated the embedding cache from DiskCache to SQLite — consolidating all persistent state into a single `.db` file and removing two external dependencies.
 
 ## Core Value
 
@@ -38,49 +38,57 @@ All LLM and embedding calls in FastCode route through litellm, so the system wor
 - ✓ Make `task_type` explicit at `retriever.py` call sites (lines 415, 734) — v1.2
 - ✓ Consolidate `MODEL`/`LITELLM_MODEL` env vars into one (`LITELLM_MODEL` only) — v1.2
 - ✓ Verify `_stream_with_summary_filter()` chunk boundary behavior in live multi-turn session — v1.2
+- ✓ Replace `rank_bm25` (BM25Okapi, in-memory) with SQLite FTS5 virtual table as the BM25 backend — v1.3 (BM25-01)
+- ✓ Persist chunk corpus in a SQLite `chunks` table (replaces pkl serialization) — v1.3 (IDX-01)
+- ✓ Trigger-maintained FTS5 index kept in sync with `chunks` on insert/delete/update — v1.3 (STOR-03)
+- ✓ `HybridRetriever` BM25 path calls FTS5 instead of `rank_bm25`; FAISS path unchanged — v1.3 (BM25-02)
+- ✓ `{repo_name}_bm25.pkl` files no longer written or read; BM25 corpus fully SQLite-backed — v1.3 (BM25-03)
+- ✓ Indexer detects unchanged files via content_hash + mtime; skips re-chunking and re-embedding — v1.3 (IDX-02)
+- ✓ `embedding_cache` SQLite table stores embeddings keyed on `(content_hash, model)` as BLOB — v1.3 (EMB-01)
+- ✓ `CodeEmbedder.embed_text()` checks SQLite cache before calling `litellm.embedding()` — v1.3 (EMB-02)
 
 ### Active
 
-<!-- v1.3: SQLite FTS5 BM25 Migration — Phase 14 remaining -->
-
-- [ ] Migrate embedding cache from DiskCache to a SQLite `embedding_cache` table (keyed on content hash + model) — Phase 14
-
-### Validated (v1.3 partial)
-
-- ✓ Replace `rank_bm25` (BM25Okapi, in-memory) with SQLite FTS5 virtual table as the BM25 backend — Phase 13 (BM25-01)
-- ✓ Persist chunk corpus in a SQLite `chunks` table (replaces pkl serialization) — Phase 12 (IDX-01)
-- ✓ Trigger-maintained FTS5 index kept in sync with `chunks` on insert/delete/update — Phase 11 (STOR-03)
-- ✓ `HybridRetriever` BM25 path calls FTS5 instead of `rank_bm25`; FAISS path unchanged — Phase 13 (BM25-02)
-- ✓ Existing FAISS index files remain; SQLite DB stored alongside in `./data/` — Phase 12
-- ✓ `rank-bm25` removed from dependencies; no pkl files written or read — Phase 13 (BM25-03)
+<!-- Next milestone requirements go here -->
 
 ### Out of Scope
 
 - Nanobot changes — Nanobot already uses litellm via its own provider
-- Retrieval strategy changes — FAISS/BM25/graph weights stay as-is; only the embedding backend changes
+- Retrieval strategy changes — FAISS/BM25/graph weights stay as-is
 - New retrieval features — no new retrieval strategies, UI changes, etc.
 - Multiple simultaneous providers — one active provider at a time is sufficient
 - Offline mode — real-time generation is core
-- Gemini-native tokenizer in `truncate_to_tokens` — litellm token_counter used for count accuracy; tiktoken cl100k_base used for encode/decode truncation (close enough for context window management)
+- Gemini-native tokenizer in `truncate_to_tokens` — litellm token_counter used for count accuracy
 - `src/` layout migration — no structural benefit for this app; editable install achieves same path-independence
 - CI workflow (GitHub Actions) — no existing CI; separate milestone concern (PKG-F01)
 - Publishing to PyPI — FastCode is an internal tool; installable for local editable install only
 - Upstream HKUDS/FastCode sync — separate concern; changes would create significant merge conflicts
+- Replace FAISS with sqlite-vec (VEC-01, VEC-02) — FAISS adequate at current scale; deferred to future milestone
 
 ## Context
 
 All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python.
+
+**v1.3 shipped 2026-03-02 (Phases 11–14):**
+- `fastcode/db.py` created: SQLite schema with `chunks`, `sources`, `chunks_fts` (FTS5 content-linked, trigger-maintained)
+- `fastcode/indexer.py`: writes chunks to SQLite with SHA-256 + mtime change detection; unchanged files skipped
+- `fastcode/retriever.py`: `full_bm25()` queries FTS5 directly; `rank-bm25` dep and all `.pkl` files eliminated
+- `fastcode/embedder.py`: `embed_text()` checks `embedding_cache` SQLite table before calling `litellm.embedding()`; `diskcache` dep removed
+- `fastcode/main.py`: `--clear-cache` flag on `index` command truncates `embedding_cache` before indexing
+- 42 tests pass; 2 external deps removed (`rank-bm25`, `diskcache`)
 
 **v1.2 shipped 2026-02-27 (Phases 8–10):**
 - `pyproject.toml` + `uv.lock` (160 packages, hatchling editable install); `requirements.txt` deleted
 - Dockerfile rewritten with uv two-layer cache; `UV_NO_DEV=1` excludes pytest from production image
 - Dead `__init__.py` platform block removed; `task_type` explicit at `retriever.py:415` and `:734`
 - `MODEL` env var removed; all 5 LLM callers uniformly read `llm_client.DEFAULT_MODEL` (sourced from `LITELLM_MODEL`)
-- Live smoke tests confirm: CODE_RETRIEVAL_QUERY valid for gemini-embedding-001; streaming filter passes no SUMMARY tag leakage
 
 **Install:** `uv sync` (runtime) or `uv sync --no-dev` (production equivalent)
 
-**Known consequence:** Existing FAISS indexes are incompatible (dimension 384 → 3072 since v1.1); delete `./data/vector_store/` before first use after upgrade.
+**Known consequences (v1.3 upgrade):**
+- Delete `./data/vector_store/` — FAISS indexes incompatible (dimension 384 → 3072, v1.1 change)
+- Delete `./data/cache/` — DiskCache no longer read; next index run populates SQLite embedding cache
+- `fastcode index --clear-cache` truncates `embedding_cache` (use when switching embedding models)
 
 ## Constraints
 
@@ -88,7 +96,8 @@ All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python
 - **Streaming**: `answer_generator.py` streaming preserved via `litellm.completion_stream()` + `choices[0].delta.content` chunk format
 - **Docker**: Container deployment works with ADC (mount `~/.config/gcloud` or use workload identity)
 - **No new embedding dependencies**: sentence-transformers/torch removed; litellm (already present) handles all embedding calls
-- **FAISS index reindex required**: embedding dimension changed (384 → 3072); existing persisted indexes in `./data/vector_store/` must be deleted before first use after upgrade
+- **FAISS index reindex required**: embedding dimension changed (384 → 3072); existing persisted indexes in `./data/vector_store/` must be deleted before first use after v1.1+ upgrade
+- **SQLite single-DB convention**: all persistent state (chunks, sources, FTS5 index, embedding cache) lives in one `.db` file at `vector_store.db_path` from config
 
 ## Key Decisions
 
@@ -109,25 +118,24 @@ All LLM and embedding calls route through litellm. Package is ~17,000 LOC Python
 | `embedding_dim=3072` read from config at init (no cold-start API call) | FAISS index needs dimension at construction; cold-start call would block init | ✓ Good — CodeEmbedder.__init__() makes zero HTTP calls; dimension hardened via config |
 | R8+R10 committed atomically (requirements.txt + main.py default together) | If requirements.txt loses sentence-transformers before main.py is updated, config-absent deploy hits litellm.BadRequestError (not ImportError) | ✓ Good — atomic commit closes the deploy breakage window |
 | ~~`embed_text()` default `task_type="RETRIEVAL_QUERY"` — retriever.py callers require zero changes~~ | Backwards-compatible addition; intent was invisible at call site | ✓ Resolved in v1.2 — retriever.py lines 415 and 734 now pass task_type explicitly |
-| `ENV TOKENIZERS_PARALLELISM=false` left in Dockerfile | Harmless no-op after sentence-transformers removal | ✓ Resolved in v1.2 — removed (DEBT-07) |
 | `pyproject.toml` + hatchling over setuptools | hatchling auto-discovers `fastcode/` at repo root; no `[tool.hatch.build]` config needed | ✓ Good — zero extra config; editable install works out of the box |
 | `uv sync --locked` in Dockerfile (not `--frozen`) | `--locked` errors if lockfile is out of date; `--frozen` silently uses whatever is on disk | ✓ Good — stricter reproducibility; catches drift between pyproject.toml and uv.lock |
 | PEP 735 `[dependency-groups]` for dev isolation | Alternative to `[project.optional-dependencies]`; uv-native; excludable with `UV_NO_DEV=1` | ✓ Good — clean separation; production image verified pytest-free |
 | Remove `MODEL` env var entirely (not alias/deprecate) | Aliasing preserves the confusion; clean break with migration note is clearer | ✓ Good — `.env.example` migration note documents the change for upgraders |
+| FTS5 content-linked table (content=chunks) over contentless | Retriever can read chunk text from FTS without extra JOIN | ✓ Good — Phase 11; simplifies full_bm25() query |
+| WAL mode omitted from SQLite init | Single-process CLI tool; no concurrent readers | ✓ Good — Phase 11; keeps schema simple |
+| `executescript()` for all DDL | Cleaner single call vs N individual execute() calls | ✓ Good — Phase 11; idempotent via CREATE IF NOT EXISTS |
+| mtime_ns fast-path before SHA-256 hash in indexer | Avoids hashing unchanged files on repeated indexing runs | ✓ Good — Phase 12; significant speedup for large repos |
+| Per-file SQLite transaction with DELETE+INSERT (cascade clears chunks) | Atomic replacement; no orphan chunk rows | ✓ Good — Phase 12 |
 | `full_bm25()` as method not attribute; removed `self.full_bm25` BM25Okapi attr | Avoids name collision between method and old instance attribute | ✓ Good — Phase 13 (P01); auto-fixed BM25Okapi assignments in index_for_bm25/load_bm25 |
 | `score=1.0` placeholder in `_keyword_search()` | FTS5 rank used for ordering; normalized float score not needed | ✓ Good — Phase 13 (P01); ordering correctness preserved via ORDER BY fts.rank |
 | `_simple_bm25_scores` TF sum for repo overview (not BM25Okapi) | Corpus is <20 repos; IDF component irrelevant at this scale; removes external dep | ✓ Good — Phase 13 (P02); rank-bm25 removed from pyproject.toml |
 | `repo_overview_bm25 = True` sentinel after build | Existing `is not None` guard treats True as truthy; no conditional code change needed | ✓ Good — Phase 13 (P02); clean drop-in replacement |
-
-## Current Milestone: v1.3 SQLite FTS5 BM25 Migration
-
-**Goal:** Replace the in-memory rank_bm25/pkl BM25 backend with SQLite FTS5, and migrate the embedding cache to SQLite, while keeping FAISS for vector search.
-
-**Target features:**
-- SQLite FTS5 virtual table as BM25 backend (disk-backed, incremental, trigger-maintained)
-- `chunks` table in SQLite replaces pkl serialization of the BM25 corpus
-- `embedding_cache` table in SQLite replaces DiskCache for embeddings
-- FAISS vector index unchanged
+| BLOB (float32 bytes) for embedding storage, not JSON | 4× smaller than JSON; numpy frombuffer roundtrip is microseconds | ✓ Good — Phase 14 (P01); matches schema spec |
+| Validate embedding shape on cache retrieval, raise ValueError | Surfacing model-switch misconfiguration is better than silently returning wrong-dim vectors | ✓ Good — Phase 14 (P01); error message includes --clear-cache hint |
+| `embed_text()` signature unchanged — cache transparent to callers | Zero changes to indexer or retriever call sites | ✓ Good — Phase 14 (P01); drop-in replacement for DiskCache |
+| `--clear-cache` on `index` command (not standalone command) | Primary use case is clearing before re-indexing; separate command adds scope | ✓ Good — Phase 14 (P02) |
+| Start fresh on DiskCache → SQLite migration (no data migration) | DiskCache format incompatible; cache is performance optimization only | ✓ Good — Phase 14 (P02); clean break |
 
 ---
-*Last updated: 2026-03-02 after Phase 13*
+*Last updated: 2026-03-02 after v1.3 milestone*
