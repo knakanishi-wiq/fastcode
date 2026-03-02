@@ -47,3 +47,13 @@
 
 ---
 
+
+## v1.3 SQLite FTS5 BM25 Migration (Shipped: 2026-03-02)
+
+**Phases completed:** 4 phases, 6 plans, 0 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+

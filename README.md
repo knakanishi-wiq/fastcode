@@ -948,6 +948,24 @@ black .
 
 ---
 
+## Known Consequences
+
+### v1.3 Embedding Cache Migration
+
+- **DiskCache removed**: The `diskcache` embedding cache (`./data/cache/`) is no longer used.
+  Delete the old cache directory: `rm -rf ./data/cache`
+- **SQLite embedding_cache**: Embeddings are now cached in the SQLite database (`./data/fastcode.db`
+  by default, configurable via `vector_store.db_path`). The cache starts empty on first use.
+- **Full re-index required after upgrade**: Run `fastcode index ...` (or equivalent) to rebuild
+  the embedding cache. Subsequent runs will be served from the new cache with no API calls.
+- **Model change**: If you change the embedding model, run with `--clear-cache` to discard stale
+  embeddings before re-indexing:
+  ```bash
+  python main.py index --repo-path /path/to/repo --clear-cache
+  ```
+
+---
+
 ## 📄 License
 
 FastCode is released under the MIT License. See [LICENSE](LICENSE) for details.

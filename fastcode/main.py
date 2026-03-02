@@ -3,13 +3,11 @@ Main FastCode Class - Orchestrate all components
 """
 
 import os
-import pickle
 import logging
 import re
 from urllib.parse import urlparse
 from typing import Optional, Dict, Any, List, Callable
 import numpy as np
-from rank_bm25 import BM25Okapi
 
 from .utils import load_config, resolve_config_paths, setup_logging, compute_file_hash, ensure_dir
 from .loader import RepositoryLoader
@@ -83,26 +81,29 @@ class FastCode:
         self.module_resolver = None
         self.symbol_resolver = None
         
+        # CacheManager first — embedder and retriever share its SQLite connection.
+        self.cache_manager = CacheManager(self.config)
+
         # Initialize components
         self.loader = RepositoryLoader(self.config)
         self.parser = CodeParser(self.config)
-        self.embedder = CodeEmbedder(self.config)
+        self.embedder = CodeEmbedder(self.config, cache_manager=self.cache_manager)
         self.vector_store = VectorStore(self.config)
         self.indexer = CodeIndexer(self.config, self.loader, self.parser, self.embedder, self.vector_store)
         self.graph_builder = CodeGraphBuilder(self.config)
-        
+
         # Get repo_root from config if available
         config_repo_root = self.config.get("repo_root")
         config_repo_root = os.path.abspath(config_repo_root)
         ensure_dir(config_repo_root)
         self.logger.info(f"Configured repo_root: {config_repo_root}")
-        
-        self.retriever = HybridRetriever(self.config, self.vector_store, 
+
+        self.retriever = HybridRetriever(self.config, self.vector_store,
                                          self.embedder, self.graph_builder,
-                                         repo_root=config_repo_root)
+                                         repo_root=config_repo_root,
+                                         db_conn=self.cache_manager._db_conn)
         self.query_processor = QueryProcessor(self.config)
         self.answer_generator = AnswerGenerator(self.config)
-        self.cache_manager = CacheManager(self.config)
         
         # State
         self.repo_loaded = False
@@ -269,19 +270,15 @@ class FastCode:
             # This will now use the initialized resolvers to build precise graphs
             self.graph_builder.build_graphs(elements, self.module_resolver, self.symbol_resolver)
             
-            # Index for BM25
-            self.retriever.index_for_bm25(elements)
-            
             # Build separate BM25 index for repository overviews
             self.retriever.build_repo_overview_bm25()
-            
+
             # Save artifacts only when persistence is enabled
             if self._should_persist_indexes():
                 # Save to cache with repository-specific name
                 self._save_to_cache(cache_name=repo_name)
 
-                # Save BM25 and graph data
-                self.retriever.save_bm25(repo_name)
+                # Save graph data
                 self.graph_builder.save(repo_name)
             else:
                 self.logger.info("Skipping on-disk persistence (ephemeral/evaluation mode)")
@@ -672,34 +669,24 @@ class FastCode:
             if self.vector_store.load(cache_name):
                 self.logger.info(f"Loaded vector store from cache for {cache_name}")
                 
-                # Load BM25 index
-                bm25_loaded = self.retriever.load_bm25(cache_name)
-                if not bm25_loaded:
-                    self.logger.warning("Failed to load BM25 index, will need to rebuild")
-                
                 # Build separate repo overview BM25 index
                 self.retriever.build_repo_overview_bm25()
-                
+
                 # Load graph data
                 graph_loaded = self.graph_builder.load(cache_name)
                 if not graph_loaded:
                     self.logger.warning("Failed to load graph data, will need to rebuild")
-                
-                # If BM25 or graph failed to load, reconstruct from metadata
-                if not bm25_loaded or not graph_loaded:
-                    self.logger.info("Reconstructing missing components from metadata...")
+
+                # If graph failed to load, reconstruct from metadata
+                if not graph_loaded:
+                    self.logger.info("Reconstructing missing graph from metadata...")
                     elements = self._reconstruct_elements_from_metadata()
-                    
+
                     if elements:
-                        if not bm25_loaded:
-                            self.retriever.index_for_bm25(elements)
-                            self.logger.info(f"Rebuilt BM25 index with {len(elements)} elements")
-                        
-                        if not graph_loaded:
-                            # Note: Rebuilding graph from metadata is a fallback.
-                            # Precise linking might be limited if repo_root context is lost.
-                            self.graph_builder.build_graphs(elements)
-                            self.logger.info("Rebuilt code graph (fallback mode)")
+                        # Note: Rebuilding graph from metadata is a fallback.
+                        # Precise linking might be limited if repo_root context is lost.
+                        self.graph_builder.build_graphs(elements)
+                        self.logger.info("Rebuilt code graph (fallback mode)")
                     else:
                         self.logger.warning("No elements reconstructed from metadata")
                 
@@ -910,9 +897,7 @@ class FastCode:
                 "force_reindex": False,
             },
             "cache": {
-                "enabled": True,
-                "backend": "disk",
-                "cache_directory": "./data/cache",
+                "enabled": False,
                 "cache_queries": False,
             },
             "logging": {
@@ -999,15 +984,10 @@ class FastCode:
                     # Save this repository's vector index separately
                     temp_vector_store.save(repo_name)
                     
-                    # Build and save BM25 index for this repository
-                    temp_retriever = HybridRetriever(self.config, temp_vector_store, 
+                    # Build separate BM25 index for repository overviews
+                    temp_retriever = HybridRetriever(self.config, temp_vector_store,
                                                      self.embedder, self.graph_builder,
                                                      repo_root=self.loader.repo_path)
-                    temp_retriever.index_for_bm25(elements)
-                    temp_retriever.save_bm25(repo_name)
-                    self.logger.info(f"Saved BM25 index for {repo_name}")
-                    
-                    # Build separate BM25 index for repository overviews
                     temp_retriever.build_repo_overview_bm25()
                     self.logger.info(f"Built repo overview BM25 index")
                     
@@ -1195,32 +1175,11 @@ class FastCode:
                         "total_size_mb": 0,
                     }
             
-            # Try to load BM25 and graph data from saved files
-            # For multi-repo, we merge BM25 data from all loaded repositories
-            self.logger.info("Loading BM25 and graph data...")
-            
-            all_bm25_elements = []
-            all_bm25_corpus = []
+            # Load graph data for all repositories
+            self.logger.info("Loading graph data...")
+
             graphs_loaded = False
-            
             for repo_name in repos_to_load:
-                # Try loading BM25 for each repo
-                bm25_path = os.path.join(self.retriever.persist_dir, f"{repo_name}_bm25.pkl")
-                if os.path.exists(bm25_path):
-                    try:
-                        with open(bm25_path, 'rb') as f:
-                            data = pickle.load(f)
-                            all_bm25_corpus.extend(data["bm25_corpus"])
-                            
-                            # Reconstruct CodeElement objects
-                            for elem_dict in data["bm25_elements"]:
-                                all_bm25_elements.append(CodeElement(**elem_dict))
-                        
-                        self.logger.info(f"Loaded BM25 data for {repo_name}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load BM25 data for {repo_name}: {e}")
-                
-                # Load graph data (merge into main graph)
                 if not graphs_loaded:
                     # Load the first repository's graph as base
                     if self.graph_builder.load(repo_name):
@@ -1232,27 +1191,6 @@ class FastCode:
                         self.logger.info(f"Merged graph data from {repo_name}")
                     else:
                         self.logger.warning(f"Failed to merge graph data from {repo_name}")
-                    # TODO: Merge additional repository graphs if needed
-            # Rebuild FULL BM25 index with merged data (for repository selection)
-            if all_bm25_elements and all_bm25_corpus:
-                self.retriever.full_bm25_elements = all_bm25_elements
-                self.retriever.full_bm25_corpus = all_bm25_corpus
-                self.retriever.full_bm25 = BM25Okapi(all_bm25_corpus)
-                self.logger.info(f"Rebuilt full BM25 index with {len(all_bm25_elements)} merged elements")
-            else:
-                # Fallback: reconstruct from metadata
-                self.logger.info("No BM25 data found, reconstructing from metadata...")
-                elements = self._reconstruct_elements_from_metadata()
-                
-                if elements:
-                    self.retriever.index_for_bm25(elements)
-                    self.logger.info(f"Rebuilt BM25 index with {len(elements)} elements")
-                    
-                    if not graphs_loaded:
-                        self.graph_builder.build_graphs(elements)
-                        self.logger.info("Rebuilt code graph")
-                else:
-                    self.logger.warning("No elements reconstructed from metadata")
             
             # Build separate BM25 index for repository overviews
             self.retriever.build_repo_overview_bm25()
@@ -1357,7 +1295,6 @@ class FastCode:
         file_patterns = [
             f"{repo_name}.faiss",
             f"{repo_name}_metadata.pkl",
-            f"{repo_name}_bm25.pkl",
             f"{repo_name}_graphs.pkl",
         ]
 

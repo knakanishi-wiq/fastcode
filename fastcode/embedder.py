@@ -2,17 +2,22 @@
 Code Embedder - Generate embeddings for code snippets
 """
 
+import hashlib
 import logging
-from typing import List, Dict, Any, Optional
+from typing import TYPE_CHECKING, List, Dict, Any, Optional
 import numpy as np
 import litellm
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    from .cache import CacheManager
 
 
 class CodeEmbedder:
     """Generate embeddings for code using litellm/VertexAI"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any],
+                 cache_manager: Optional["CacheManager"] = None):
         self.config = config
         self.embedding_config = config.get("embedding", {})
         self.logger = logging.getLogger(__name__)
@@ -24,19 +29,37 @@ class CodeEmbedder:
 
         self.logger.info(f"Embedding model: {self.model_name} (dim={self.embedding_dim})")
         # No model download at init — litellm routes to VertexAI API at call time
+        self._cache_manager = cache_manager
 
     def embed_text(self, text: str, task_type: str = "RETRIEVAL_QUERY") -> np.ndarray:
         """
-        Generate embedding for a single text.
+        Generate embedding for a single text, checking the cache first.
 
         Args:
             text: Input text
             task_type: Vertex AI task type — "RETRIEVAL_QUERY" (default) or "RETRIEVAL_DOCUMENT"
 
         Returns:
-            Embedding vector
+            Embedding vector (from cache or freshly computed)
         """
-        return self.embed_batch([text], task_type=task_type)[0]
+        content_hash = None
+        if self._cache_manager is not None:
+            content_hash = hashlib.sha256(text.encode()).hexdigest()
+            cached = self._cache_manager.get_embedding(content_hash, self.model_name)
+            if cached is not None:
+                if cached.shape[0] != self.embedding_dim:
+                    raise ValueError(
+                        f"Cached embedding dim {cached.shape[0]} != expected {self.embedding_dim}. "
+                        f"Run: fastcode index --clear-cache to rebuild after a model change."
+                    )
+                return cached
+
+        result = self.embed_batch([text], task_type=task_type)[0]
+
+        if content_hash is not None:
+            self._cache_manager.set_embedding(content_hash, self.model_name, result)
+
+        return result
 
     def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_QUERY") -> np.ndarray:
         """
@@ -81,6 +104,9 @@ class CodeEmbedder:
         """
         Generate embeddings for code elements (functions, classes, etc.)
 
+        When a CacheManager is available, cached embeddings are looked up in bulk
+        and only cache-miss elements are sent to the embedding API.
+
         Args:
             elements: List of code element dictionaries
 
@@ -90,18 +116,47 @@ class CodeEmbedder:
         if not elements:
             return []
 
-        # Prepare texts for embedding
         texts = [self._prepare_code_text(elem) for elem in elements]
 
-        # Generate embeddings
-        self.logger.info(f"Generating embeddings for {len(texts)} code elements")
-        embeddings = self.embed_batch(texts, task_type="RETRIEVAL_DOCUMENT")
-        self.logger.info(f"✓ Successfully generated embeddings for {len(embeddings)} code elements")
+        if self._cache_manager is None:
+            # No cache — embed everything directly.
+            self.logger.info(f"Generating embeddings for {len(texts)} code elements")
+            embeddings = self.embed_batch(texts, task_type="RETRIEVAL_DOCUMENT")
+            self.logger.info(
+                f"✓ Successfully generated embeddings for {len(embeddings)} code elements"
+            )
+            for i, (elem, emb) in enumerate(zip(elements, embeddings)):
+                elem["embedding"] = emb
+                elem["embedding_text"] = texts[i]
+            return elements
 
-        # Add embeddings to elements
-        for elem, embedding in zip(elements, embeddings):
-            elem["embedding"] = embedding
-            elem["embedding_text"] = texts[elements.index(elem)]
+        # Cache-aware bulk path: one DB query for all hashes, API only for misses.
+        content_hashes = [hashlib.sha256(t.encode()).hexdigest() for t in texts]
+        cached = self._cache_manager.get_embeddings_batch(content_hashes, self.model_name)
+
+        miss_indices = [i for i, h in enumerate(content_hashes) if h not in cached]
+        if miss_indices:
+            miss_texts = [texts[i] for i in miss_indices]
+            self.logger.info(
+                f"Generating embeddings for {len(miss_texts)} code elements "
+                f"({len(elements) - len(miss_indices)} cached)"
+            )
+            new_embeddings = self.embed_batch(miss_texts, task_type="RETRIEVAL_DOCUMENT")
+            self.logger.info(
+                f"✓ Successfully generated embeddings for {len(new_embeddings)} code elements"
+            )
+            entries = [
+                {"content_hash": content_hashes[i], "model": self.model_name,
+                 "embedding": new_embeddings[j]}
+                for j, i in enumerate(miss_indices)
+            ]
+            self._cache_manager.set_embeddings_batch(entries)
+            for j, i in enumerate(miss_indices):
+                cached[content_hashes[i]] = new_embeddings[j]
+
+        for i, (elem, text) in enumerate(zip(elements, texts)):
+            elem["embedding"] = cached[content_hashes[i]]
+            elem["embedding_text"] = text
 
         return elements
 

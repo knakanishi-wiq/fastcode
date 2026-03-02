@@ -4,9 +4,12 @@ Code Indexer - Multi-level indexing of code repositories
 
 import hashlib
 import logging
+import os
+import sqlite3
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
+import pathspec
 
 from .loader import RepositoryLoader
 from .parser import CodeParser, FileParseResult
@@ -14,6 +17,9 @@ from .embedder import CodeEmbedder
 from .repo_overview import RepositoryOverviewGenerator
 from .utils import count_tokens, normalize_path
 from .vector_store import VectorStore
+from .db import init_db
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class CodeElement:
@@ -453,4 +459,166 @@ class CodeIndexer:
             overviews = self.vector_store.load_repo_overviews()
             return overviews.get(self.current_repo_name)
         return None
+
+
+def index_repo(
+    repo_path: str,
+    db_path: str,
+    max_file_size_bytes: int = 1_000_000,
+) -> Dict[str, int]:
+    """
+    Walk repo_path and write all parsed code chunks into the SQLite database at
+    db_path. Change detection is performed via mtime_ns and SHA-256 content hash.
+
+    Args:
+        repo_path: Absolute path to the repository root.
+        db_path: Filesystem path to the SQLite database file.
+        max_file_size_bytes: Files larger than this are silently skipped.
+
+    Returns:
+        Dict with keys: indexed, skipped, deleted, errors (all int counts).
+    """
+    conn = init_db(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    indexed = 0
+    skipped = 0
+    deleted = 0
+    errors = 0
+
+    # Load .gitignore patterns
+    gitignore_path = os.path.join(repo_path, ".gitignore")
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r", encoding="utf-8", errors="replace") as fh:
+            spec = pathspec.PathSpec.from_lines("gitignore", fh)
+    else:
+        spec = pathspec.PathSpec.from_lines("gitignore", [])
+
+    seen_paths: set = set()
+
+    for dirpath, dirs, files in os.walk(repo_path, topdown=True):
+        # Prune hidden directories in-place
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+        for filename in files:
+            abs_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(abs_path, repo_path)
+
+            # .gitignore filtering
+            if spec.match_file(rel_path):
+                continue
+
+            # Size filtering
+            try:
+                file_size = os.path.getsize(abs_path)
+            except OSError:
+                continue
+            if file_size > max_file_size_bytes:
+                continue
+
+            try:
+                stat_result = os.stat(abs_path)
+                file_mtime_ns = stat_result.st_mtime_ns
+                file_size = stat_result.st_size
+
+                # Fast-path: check stored mtime_ns
+                row = conn.execute(
+                    "SELECT mtime_ns, content_hash FROM sources WHERE path = ?",
+                    (rel_path,),
+                ).fetchone()
+
+                if row and row[0] == file_mtime_ns:
+                    # mtime identical — assume unchanged
+                    logger.info("Skipped %s (unchanged)", rel_path)
+                    seen_paths.add(rel_path)
+                    skipped += 1
+                    continue
+
+                # Read file bytes and compute hash
+                with open(abs_path, "rb") as fh:
+                    file_bytes = fh.read()
+                file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+                if row and file_hash == row[1]:
+                    # Content unchanged — only mtime drifted; update mtime
+                    with conn:
+                        conn.execute(
+                            "UPDATE sources SET mtime_ns = ? WHERE path = ?",
+                            (file_mtime_ns, rel_path),
+                        )
+                    logger.info("Skipped %s (unchanged)", rel_path)
+                    seen_paths.add(rel_path)
+                    skipped += 1
+                    continue
+
+                # File is new or changed — parse and index
+                content = file_bytes.decode("utf-8", errors="replace")
+                parse_result = CodeParser({}).parse_file(abs_path, content)
+                if parse_result is None or parse_result.language == "unknown":
+                    # Unsupported extension — skip silently
+                    continue
+
+                lines = content.split("\n")
+
+                # Build chunk list: classes first, then functions
+                raw_chunks = []
+                for cls in parse_result.classes:
+                    chunk_lines = lines[cls.start_line - 1 : cls.end_line]
+                    raw_chunks.append((cls.start_line, cls.end_line, "\n".join(chunk_lines)))
+                for func in parse_result.functions:
+                    chunk_lines = lines[func.start_line - 1 : func.end_line]
+                    raw_chunks.append((func.start_line, func.end_line, "\n".join(chunk_lines)))
+
+                # Deduplicate by start_line (first occurrence wins)
+                seen_starts: dict = {}
+                for start, end, text in raw_chunks:
+                    if start not in seen_starts:
+                        seen_starts[start] = (start, end, text)
+                chunks = list(seen_starts.values())
+
+                # Fallback: treat entire file as one chunk if no classes/functions
+                if not chunks:
+                    chunks = [(1, len(lines), content)]
+
+                with conn:
+                    # Delete old data for this path (cascades to chunks)
+                    conn.execute("DELETE FROM sources WHERE path = ?", (rel_path,))
+                    # Insert new source record
+                    conn.execute(
+                        "INSERT INTO sources (path, content_hash, mtime_ns, size) "
+                        "VALUES (?, ?, ?, ?)",
+                        (rel_path, file_hash, file_mtime_ns, file_size),
+                    )
+                    # Insert chunks
+                    for chunk_index, (start, end, text) in enumerate(chunks):
+                        chunk_hash = hashlib.sha256(
+                            text.encode("utf-8", errors="replace")
+                        ).hexdigest()
+                        conn.execute(
+                            "INSERT INTO chunks "
+                            "(source_path, content, content_hash, chunk_index, start_offset, end_offset) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (rel_path, text, chunk_hash, chunk_index, start, end),
+                        )
+
+                logger.info("Indexed %s", rel_path)
+                seen_paths.add(rel_path)
+                indexed += 1
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to index %s: %s", rel_path, exc)
+                errors += 1
+
+    # Remove sources for files no longer on disk
+    all_stored = [
+        row[0] for row in conn.execute("SELECT path FROM sources").fetchall()
+    ]
+    for stored_path in all_stored:
+        if stored_path not in seen_paths:
+            with conn:
+                conn.execute("DELETE FROM sources WHERE path = ?", (stored_path,))
+            logger.info("Deleted %s (removed from disk)", stored_path)
+            deleted += 1
+
+    return {"indexed": indexed, "skipped": skipped, "deleted": deleted, "errors": errors}
 

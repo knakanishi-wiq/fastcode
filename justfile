@@ -4,3 +4,6 @@ build-local-macos:
         --build-arg CERT=1 \
         --secret id=corporate_ca,src=/tmp/corp-ca.pem \
         -t fastcode:test .
+
+run:
+    uv run web_app.py

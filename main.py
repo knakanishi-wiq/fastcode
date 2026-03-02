@@ -145,21 +145,28 @@ def query(repo_url, repo_path, repo_zip, query, config, output, verbose, load_ca
 @click.option('--repo-path', '-p', help='Local repository path')
 @click.option('--repo-zip', '-z', help='ZIP file containing repository')
 @click.option('--config', '-c', help='Path to configuration file')
-def index(repo_url, repo_path, repo_zip, config):
+@click.option('--clear-cache', is_flag=True, help='Truncate embedding_cache table before indexing')
+def index(repo_url, repo_path, repo_zip, config, clear_cache):
     """Index a repository (without querying)"""
-    
+
     if not repo_url and not repo_path and not repo_zip:
         click.echo("Error: Either --repo-url, --repo-path, or --repo-zip must be provided", err=True)
         sys.exit(1)
-    
+
     # Check for conflicting options
     provided_options = sum([bool(repo_url), bool(repo_path), bool(repo_zip)])
     if provided_options > 1:
         click.echo("Error: Only one of --repo-url, --repo-path, or --repo-zip can be specified", err=True)
         sys.exit(1)
-    
+
     fastcode = FastCode(config_path=config)
-    
+
+    if clear_cache:
+        if fastcode.cache_manager.clear_embedding_cache():
+            click.echo("Embedding cache cleared.")
+        else:
+            click.echo("Warning: could not clear embedding cache", err=True)
+
     try:
         # Load repository
         if repo_zip:
@@ -419,11 +426,16 @@ def interactive(repo_url, repo_path, repo_zip, config, load_cache, repos, multi_
 def clear_cache():
     """Clear all cached data"""
     fastcode = FastCode()
-    
-    if fastcode.cache_manager.clear():
-        click.echo("Cache cleared successfully")
+
+    if fastcode.cache_manager.clear_embedding_cache():
+        click.echo("Embedding cache cleared successfully")
     else:
-        click.echo("Failed to clear cache or cache is disabled")
+        click.echo("Failed to clear embedding cache")
+
+    if fastcode.cache_manager.clear():
+        click.echo("Query result cache cleared successfully")
+    else:
+        click.echo("Failed to clear query result cache or cache is disabled")
 
 
 @cli.command()
@@ -452,7 +464,7 @@ def cache_stats():
 @click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
 @click.option('--keep-source', is_flag=True, help='Keep cloned source code in repos/')
 def remove_repo(repo_name, config, confirm, keep_source):
-    """Remove a repository and all its data (index, BM25, graphs, overview, source)"""
+    """Remove a repository and all its data (index, graphs, overview, source)"""
 
     fastcode = FastCode(config_path=config)
     persist_dir = fastcode.vector_store.persist_dir
@@ -462,7 +474,6 @@ def remove_repo(repo_name, config, confirm, keep_source):
     file_patterns = [
         f"{repo_name}.faiss",
         f"{repo_name}_metadata.pkl",
-        f"{repo_name}_bm25.pkl",
         f"{repo_name}_graphs.pkl",
     ]
     existing_files = []
