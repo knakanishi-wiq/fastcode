@@ -179,12 +179,9 @@ agent:
 cache:
   enabled: true
   backend: "disk" # disk or redis
-  ttl: 3600 # seconds (1 hour) - for embeddings and general cache
-  dialogue_ttl: 2592000 # seconds (30 days) - for dialogue history persistence
-  max_size_mb: 1000
-  cache_embeddings: true
-  cache_queries: false
-  cache_directory: "./data/cache"
+  ttl: 3600 # seconds (1 hour) - Redis only; SQLite embedding cache has no TTL
+  dialogue_ttl: 2592000 # seconds (30 days) - Redis only; for dialogue history persistence
+  cache_queries: false # Redis only; cache full query results
 
 # Evaluation Mode Settings
 evaluation:
