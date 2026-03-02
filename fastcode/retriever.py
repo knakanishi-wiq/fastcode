@@ -149,11 +149,26 @@ class HybridRetriever:
         self.repo_overview_bm25 = True  # Sentinel: corpus is ready; scoring via _simple_bm25_scores
         self.logger.info(f"Built repo overview BM25 index with {len(self.repo_overview_bm25_corpus)} repositories")
 
+    @staticmethod
+    def _sanitize_fts5_query(query: str) -> str:
+        """Wrap each whitespace-separated token in FTS5 double-quote literals.
+
+        FTS5 interprets bare operators like ?, *, ^, (, ) as syntax elements.
+        Quoting every token treats them as exact phrase terms and avoids parse
+        errors when the query comes from LLM-generated or user-supplied strings.
+        A literal " inside a token is escaped as "" per FTS5 spec.
+        """
+        tokens = [t for t in query.split() if t]
+        if not tokens:
+            return '""'
+        return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
     def full_bm25(self, query: str, repo_path: str = "", top_k: int = 10) -> list:
         """Query chunks_fts for BM25-ranked results optionally scoped to repo_path.
 
         Args:
-            query: Raw search string for FTS5 MATCH.
+            query: Raw search string for FTS5 MATCH. Special FTS5 syntax chars
+                are automatically quoted so arbitrary strings are safe to pass.
             repo_path: Relative path prefix; only chunks whose source_path starts
                 with this prefix are returned. Empty string matches all chunks.
             top_k: Maximum results to return.
@@ -162,6 +177,7 @@ class HybridRetriever:
             List of dicts with chunk fields: id, source_path, content,
             content_hash, chunk_index, start_offset, end_offset.
         """
+        fts_query = self._sanitize_fts5_query(query)
         like_pattern = (repo_path.rstrip("/") + "/%") if repo_path else "%"
         rows = self._db_conn.execute(
             """
@@ -174,7 +190,7 @@ class HybridRetriever:
             ORDER  BY fts.rank
             LIMIT  ?
             """,
-            (query, like_pattern, top_k),
+            (fts_query, like_pattern, top_k),
         ).fetchall()
         keys = ("id", "source_path", "content",
                 "content_hash", "chunk_index", "start_offset", "end_offset")
