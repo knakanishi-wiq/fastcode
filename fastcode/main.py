@@ -89,9 +89,11 @@ class FastCode:
         ensure_dir(config_repo_root)
         self.logger.info(f"Configured repo_root: {config_repo_root}")
         
-        self.retriever = HybridRetriever(self.config, self.vector_store, 
+        self.retriever = HybridRetriever(self.config, self.vector_store,
                                          self.embedder, self.graph_builder,
                                          repo_root=config_repo_root)
+        # Wire retriever's DB connection into embedder for embedding_cache lookups.
+        self.embedder._db_conn = self.retriever._db_conn
         self.query_processor = QueryProcessor(self.config)
         self.answer_generator = AnswerGenerator(self.config)
         self.cache_manager = CacheManager(self.config)
