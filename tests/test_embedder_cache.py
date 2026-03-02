@@ -4,7 +4,8 @@ Unit tests for CacheManager-backed embedding cache in CodeEmbedder.
 Tests use in-memory SQLite (via CacheManager with backend="disk") and
 mocked embed_batch to avoid VertexAI calls.
 Covers cache hit, cache miss, shape mismatch, no-cache-manager guard,
-and bulk embed_code_elements caching.
+bulk embed_code_elements caching (all-miss, all-hit, partial-hit),
+and CacheManager embedding methods in isolation.
 """
 import hashlib
 from unittest.mock import patch
@@ -131,3 +132,113 @@ class TestEmbedderCache:
         mock_batch2.assert_not_called()
         assert np.array_equal(result2[0]["embedding"], fake_embeddings[0])
         assert np.array_equal(result2[1]["embedding"], fake_embeddings[1])
+
+    def test_embed_code_elements_partial_cache_hit(self):
+        """embed_batch receives only uncached elements; results reassembled in original order."""
+        cm, embedder = _make_cache_and_embedder()
+
+        elements = [
+            {"type": "function", "name": "cached",      "code": "def cached(): pass"},
+            {"type": "function", "name": "uncached",    "code": "def uncached(): pass"},
+            {"type": "function", "name": "also_cached", "code": "def also_cached(): pass"},
+        ]
+        # Pre-seed the cache for elements 0 and 2 using the same text the embedder will produce.
+        texts = [embedder._prepare_code_text(e) for e in elements]
+        vec0 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        vec2 = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        cm.set_embedding(_content_hash(texts[0]), MODEL, vec0)
+        cm.set_embedding(_content_hash(texts[2]), MODEL, vec2)
+
+        # embed_batch should be called with only the text for element 1 (the miss).
+        miss_vec = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
+        with patch.object(embedder, "embed_batch", return_value=miss_vec) as mock_batch:
+            result = embedder.embed_code_elements([dict(e) for e in elements])
+
+        mock_batch.assert_called_once_with([texts[1]], task_type="RETRIEVAL_DOCUMENT")
+        assert np.array_equal(result[0]["embedding"], vec0)
+        assert np.array_equal(result[1]["embedding"], miss_vec[0])
+        assert np.array_equal(result[2]["embedding"], vec2)
+
+
+class TestCacheManagerEmbeddings:
+    """CacheManager embedding methods tested in isolation (disk/SQLite backend)."""
+
+    def _make_cm(self):
+        return CacheManager(CONFIG)
+
+    def test_get_embedding_miss(self):
+        """Returns None when the hash is not in the cache."""
+        cm = self._make_cm()
+        assert cm.get_embedding("no_such_hash", MODEL) is None
+
+    def test_set_and_get_embedding_roundtrip(self):
+        """set_embedding stores; get_embedding retrieves identical values."""
+        cm = self._make_cm()
+        h = _content_hash("roundtrip text")
+        vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        assert cm.set_embedding(h, MODEL, vec)
+        result = cm.get_embedding(h, MODEL)
+        assert result is not None
+        assert np.array_equal(result, vec)
+
+    def test_set_embedding_is_idempotent(self):
+        """Second set_embedding for the same key does not overwrite (INSERT OR IGNORE)."""
+        cm = self._make_cm()
+        h = _content_hash("idempotent text")
+        vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        vec2 = np.array([9.0, 9.0, 9.0], dtype=np.float32)
+        cm.set_embedding(h, MODEL, vec1)
+        cm.set_embedding(h, MODEL, vec2)
+        assert np.array_equal(cm.get_embedding(h, MODEL), vec1)
+
+    def test_get_embeddings_batch_partial_hit(self):
+        """get_embeddings_batch returns only the hashes that are present."""
+        cm = self._make_cm()
+        h1, h2, h3 = (_content_hash(t) for t in ("a", "b", "c"))
+        vec1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        vec3 = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        cm.set_embedding(h1, MODEL, vec1)
+        cm.set_embedding(h3, MODEL, vec3)
+
+        result = cm.get_embeddings_batch([h1, h2, h3], MODEL)
+
+        assert set(result.keys()) == {h1, h3}
+        assert np.array_equal(result[h1], vec1)
+        assert np.array_equal(result[h3], vec3)
+
+    def test_set_embeddings_batch_idempotent(self):
+        """set_embeddings_batch: duplicate entries for existing keys are silently ignored."""
+        cm = self._make_cm()
+        h = _content_hash("batch dup")
+        vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        vec2 = np.array([9.0, 9.0, 9.0], dtype=np.float32)
+        cm.set_embedding(h, MODEL, vec1)
+        cm.set_embeddings_batch([{"content_hash": h, "model": MODEL, "embedding": vec2}])
+        assert np.array_equal(cm.get_embedding(h, MODEL), vec1)
+
+    def test_get_embeddings_batch_chunking(self):
+        """get_embeddings_batch retrieves all entries when count exceeds the 900-param chunk size."""
+        cm = self._make_cm()
+        n = 901
+        hashes = [_content_hash(f"chunk_text_{i}") for i in range(n)]
+        vecs = [np.array([float(i), float(i), float(i)], dtype=np.float32) for i in range(n)]
+        cm.set_embeddings_batch(
+            [{"content_hash": h, "model": MODEL, "embedding": v} for h, v in zip(hashes, vecs)]
+        )
+
+        result = cm.get_embeddings_batch(hashes, MODEL)
+
+        assert len(result) == n
+        for h, v in zip(hashes, vecs):
+            assert np.array_equal(result[h], v)
+
+    def test_clear_embedding_cache_removes_all_rows(self):
+        """clear_embedding_cache deletes every row; subsequent gets return None."""
+        cm = self._make_cm()
+        h = _content_hash("to be cleared")
+        cm.set_embedding(h, MODEL, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+        assert cm.get_embedding(h, MODEL) is not None
+
+        assert cm.clear_embedding_cache()
+
+        assert cm.get_embedding(h, MODEL) is None
