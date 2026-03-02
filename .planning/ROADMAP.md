@@ -128,4 +128,4 @@ Plans:
 | 11. SQLite Schema and DB Init | 1/1 | Complete    | 2026-02-27 | — |
 | 12. Indexer Integration | 1/1 | Complete    | 2026-02-27 | — |
 | 13. BM25 Retriever Swap | 2/2 | Complete    | 2026-03-01 | — |
-| 14. Embedding Cache Migration | 2/2 | Complete   | 2026-03-02 | — |
+| 14. Embedding Cache Migration | 2/2 | Complete    | 2026-03-02 | — |
