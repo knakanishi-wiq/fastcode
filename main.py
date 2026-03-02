@@ -464,7 +464,7 @@ def cache_stats():
 @click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
 @click.option('--keep-source', is_flag=True, help='Keep cloned source code in repos/')
 def remove_repo(repo_name, config, confirm, keep_source):
-    """Remove a repository and all its data (index, BM25, graphs, overview, source)"""
+    """Remove a repository and all its data (index, graphs, overview, source)"""
 
     fastcode = FastCode(config_path=config)
     persist_dir = fastcode.vector_store.persist_dir
@@ -474,7 +474,6 @@ def remove_repo(repo_name, config, confirm, keep_source):
     file_patterns = [
         f"{repo_name}.faiss",
         f"{repo_name}_metadata.pkl",
-        f"{repo_name}_bm25.pkl",
         f"{repo_name}_graphs.pkl",
     ]
     existing_files = []
