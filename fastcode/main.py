@@ -861,9 +861,7 @@ class FastCode:
                 "force_reindex": False,
             },
             "cache": {
-                "enabled": True,
-                "backend": "disk",
-                "cache_directory": "./data/cache",
+                "enabled": False,
                 "cache_queries": False,
             },
             "logging": {
