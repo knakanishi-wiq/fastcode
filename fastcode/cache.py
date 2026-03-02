@@ -9,8 +9,6 @@ import logging
 import json
 import time
 from typing import Any, Optional, List, Dict
-from pathlib import Path
-from diskcache import Cache as DiskCache
 
 
 class CacheManager:
@@ -24,10 +22,6 @@ class CacheManager:
         self.enabled = self.cache_config.get("enabled", True)
         self.backend = self.cache_config.get("backend", "disk")
         self.ttl = self.cache_config.get("ttl", 3600)
-        self.max_size_mb = self.cache_config.get("max_size_mb", 1000)
-        self.cache_directory = self.cache_config.get("cache_directory", "./data/cache")
-        
-        self.cache_embeddings = self.cache_config.get("cache_embeddings", True)
         self.cache_queries = self.cache_config.get("cache_queries", False)
 
         # Dialogue history TTL (default: 30 days for long-term conversation history)
@@ -41,14 +35,15 @@ class CacheManager:
     def _initialize_cache(self):
         """Initialize cache backend"""
         if self.backend == "disk":
-            Path(self.cache_directory).mkdir(parents=True, exist_ok=True)
-            max_size_bytes = self.max_size_mb * 1024 * 1024
-            self.cache = DiskCache(
-                self.cache_directory,
-                size_limit=max_size_bytes
+            # Disk backend removed in Phase 14 (diskcache dependency eliminated).
+            # Embedding cache now uses SQLite embedding_cache table in CodeEmbedder.
+            self.logger.warning(
+                "cache.backend='disk' is no longer supported. "
+                "Set backend='redis' or disable cache (enabled=false). Disabling cache."
             )
-            self.logger.info(f"Initialized disk cache at {self.cache_directory}")
-        
+            self.enabled = False
+            return
+
         elif self.backend == "redis":
             try:
                 import redis
@@ -81,13 +76,7 @@ class CacheManager:
             return None
         
         try:
-            if self.backend == "disk":
-                value = self.cache.get(key)
-                if value is not None:
-                    self.logger.debug(f"Cache hit: {key}")
-                return value
-            
-            elif self.backend == "redis":
+            if self.backend == "redis":
                 value = self.cache.get(key)
                 if value:
                     self.logger.debug(f"Cache hit: {key}")
@@ -107,11 +96,7 @@ class CacheManager:
             ttl = self.ttl
         
         try:
-            if self.backend == "disk":
-                self.cache.set(key, value, expire=ttl)
-                return True
-            
-            elif self.backend == "redis":
+            if self.backend == "redis":
                 self.cache.setex(key, ttl, pickle.dumps(value))
                 return True
         
@@ -125,9 +110,7 @@ class CacheManager:
             return False
         
         try:
-            if self.backend == "disk":
-                return self.cache.delete(key)
-            elif self.backend == "redis":
+            if self.backend == "redis":
                 return bool(self.cache.delete(key))
         except Exception as e:
             self.logger.warning(f"Cache delete error: {e}")
@@ -139,31 +122,13 @@ class CacheManager:
             return False
         
         try:
-            if self.backend == "disk":
-                self.cache.clear()
-                self.logger.info("Cleared disk cache")
-                return True
-            elif self.backend == "redis":
+            if self.backend == "redis":
                 self.cache.flushdb()
                 self.logger.info("Cleared Redis cache")
                 return True
         except Exception as e:
             self.logger.error(f"Cache clear error: {e}")
             return False
-    
-    def get_embedding(self, text: str) -> Optional[Any]:
-        """Get cached embedding"""
-        if not self.cache_embeddings:
-            return None
-        key = self._generate_key("embedding", text)
-        return self.get(key)
-    
-    def set_embedding(self, text: str, embedding: Any) -> bool:
-        """Cache embedding"""
-        if not self.cache_embeddings:
-            return False
-        key = self._generate_key("embedding", text)
-        return self.set(key, embedding)
     
     def get_query_result(self, query: str, repo_hash: str) -> Optional[Any]:
         """Get cached query result"""
@@ -185,14 +150,7 @@ class CacheManager:
             return {"enabled": False}
         
         try:
-            if self.backend == "disk":
-                return {
-                    "enabled": True,
-                    "backend": "disk",
-                    "size": self.cache.volume(),
-                    "items": len(self.cache),
-                }
-            elif self.backend == "redis":
+            if self.backend == "redis":
                 info = self.cache.info()
                 return {
                     "enabled": True,
@@ -432,16 +390,8 @@ class CacheManager:
         
         try:
             sessions = []
-            
-            if self.backend == "disk":
-                # Scan for session index keys
-                for key in self.cache.iterkeys():
-                    if isinstance(key, str) and key.startswith("dialogue_session_") and key.endswith("_index"):
-                        session_data = self.get(key)
-                        if session_data:
-                            sessions.append(session_data)
-            
-            elif self.backend == "redis":
+
+            if self.backend == "redis":
                 # Scan for session index keys
                 for key in self.cache.scan_iter(match="dialogue_session_*_index"):
                     session_data = self.get(key.decode() if isinstance(key, bytes) else key)
