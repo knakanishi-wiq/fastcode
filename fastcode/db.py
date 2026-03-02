@@ -48,6 +48,13 @@ AFTER UPDATE ON chunks BEGIN
     INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
     INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
 END;
+
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    content_hash TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    embedding    BLOB NOT NULL,
+    PRIMARY KEY (content_hash, model)
+);
 """
 
 

@@ -2,7 +2,9 @@
 Code Embedder - Generate embeddings for code snippets
 """
 
+import hashlib
 import logging
+import sqlite3
 from typing import List, Dict, Any, Optional
 import numpy as np
 import litellm
@@ -12,7 +14,7 @@ from tqdm import tqdm
 class CodeEmbedder:
     """Generate embeddings for code using litellm/VertexAI"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], db_conn: Optional[sqlite3.Connection] = None):
         self.config = config
         self.embedding_config = config.get("embedding", {})
         self.logger = logging.getLogger(__name__)
@@ -24,19 +26,44 @@ class CodeEmbedder:
 
         self.logger.info(f"Embedding model: {self.model_name} (dim={self.embedding_dim})")
         # No model download at init — litellm routes to VertexAI API at call time
+        self._db_conn = db_conn
 
     def embed_text(self, text: str, task_type: str = "RETRIEVAL_QUERY") -> np.ndarray:
         """
-        Generate embedding for a single text.
+        Generate embedding for a single text, checking SQLite embedding_cache first.
 
         Args:
             text: Input text
             task_type: Vertex AI task type — "RETRIEVAL_QUERY" (default) or "RETRIEVAL_DOCUMENT"
 
         Returns:
-            Embedding vector
+            Embedding vector (from cache or freshly computed)
         """
-        return self.embed_batch([text], task_type=task_type)[0]
+        if self._db_conn is not None:
+            content_hash = hashlib.sha256(text.encode()).hexdigest()
+            row = self._db_conn.execute(
+                "SELECT embedding FROM embedding_cache WHERE content_hash=? AND model=?",
+                (content_hash, self.model_name),
+            ).fetchone()
+            if row is not None:
+                cached = np.frombuffer(row[0], dtype=np.float32)
+                if cached.shape[0] != self.embedding_dim:
+                    raise ValueError(
+                        f"Cached embedding dim {cached.shape[0]} != expected {self.embedding_dim}. "
+                        f"Run: fastcode index --clear-cache to rebuild after a model change."
+                    )
+                return cached
+
+        result = self.embed_batch([text], task_type=task_type)[0]
+
+        if self._db_conn is not None:
+            self._db_conn.execute(
+                "INSERT OR IGNORE INTO embedding_cache (content_hash, model, embedding) VALUES (?,?,?)",
+                (content_hash, self.model_name, result.astype(np.float32).tobytes()),
+            )
+            self._db_conn.commit()
+
+        return result
 
     def embed_batch(self, texts: List[str], task_type: str = "RETRIEVAL_QUERY") -> np.ndarray:
         """
