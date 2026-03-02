@@ -56,10 +56,13 @@ class CacheManager:
             except Exception as e:
                 self.logger.error(f"Failed to initialize Redis cache: {e}")
                 self.enabled = False
-        elif self.backend != "disk":
+        elif self.backend == "disk":
+            # Disk backend supports only the SQLite embedding cache (self._db_conn).
+            # Query result and dialogue caching require Redis; disable them.
+            self.enabled = False
+        else:
             self.logger.warning(f"Unknown cache backend: {self.backend}")
             self.enabled = False
-        # disk: self.cache stays None; embedding cache uses self._db_conn
     
     def _generate_key(self, prefix: str, *args) -> str:
         """Generate cache key from arguments"""

@@ -242,3 +242,24 @@ class TestCacheManagerEmbeddings:
         assert cm.clear_embedding_cache()
 
         assert cm.get_embedding(h, MODEL) is None
+
+    def test_disk_backend_disables_dialogue_and_query_cache(self):
+        """Disk backend keeps enabled=False so dialogue/query methods are no-ops.
+
+        Embedding methods are unaffected (they don't check self.enabled).
+        """
+        cm = self._make_cm()
+        # enabled is False for disk — query and dialogue caching require Redis.
+        assert cm.enabled is False
+
+        # Dialogue methods return falsy values without raising.
+        assert cm.save_dialogue_turn("s1", 1, "q", "a", "summary") is False
+        assert cm.get_dialogue_turn("s1", 1) is None
+        assert cm.get_dialogue_history("s1") == []
+        assert cm.get_recent_summaries("s1", 3) == []
+
+        # Embedding methods still work (they bypass self.enabled).
+        h = _content_hash("still works")
+        vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        assert cm.set_embedding(h, MODEL, vec)
+        assert np.array_equal(cm.get_embedding(h, MODEL), vec)
